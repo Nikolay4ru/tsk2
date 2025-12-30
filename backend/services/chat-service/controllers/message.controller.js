@@ -1,272 +1,266 @@
 const messageModel = require('../models/message.model');
 const roomModel = require('../models/room.model');
-const redis = require('../../../shared/database/redis');
-const postgres = require('../../../shared/database/postgres');
+const eventEmitter = require('../../../shared/events/event-emitter');
 const logger = require('../../../shared/utils/logger');
 
-// Get messages
 exports.getMessages = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const before = req.query.before;
-    const after = req.query.after;
-    const limit = parseInt(req.query.limit) || 50;
-
-    // Check if user is member
+    const { before, after, limit } = req.query;
+    
     const isMember = await roomModel.isMember(roomId, req.userId);
     if (!isMember) {
       return res.status(403).json({ error: 'Not a member of this room' });
     }
-
-    const messages = await messageModel.findByRoomId(roomId, { before, after, limit });
-
+    
+    const messages = await messageModel.findByRoomId(roomId, {
+      before,
+      after,
+      limit: parseInt(limit) || 50,
+    });
+    
+    logger.info({ roomId, userId: req.userId, count: messages.length }, 'Messages retrieved');
+    
     res.json(messages);
   } catch (error) {
-    logger.error({ error: error.message }, 'Get messages error');
-    res.status(500).json({ error: 'Failed to get messages' });
+    logger.error({ error: error.message, stack: error.stack }, 'Get messages error');
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Send message
 exports.sendMessage = async (req, res) => {
   try {
-    const { roomId, content, type, fileUrl, replyTo, taskId } = req.body;
-
-    // Check if user is member (unless it's a task comment)
+    const { roomId, taskId, content, type, fileUrl, replyTo } = req.body;
+    
+    logger.info({ 
+      roomId, 
+      taskId, 
+      userId: req.userId, 
+      contentLength: content?.length 
+    }, 'Sending message');
+    
+    if (!roomId && !taskId) {
+      return res.status(400).json({ error: 'roomId or taskId required' });
+    }
+    
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ error: 'Message content required' });
+    }
+    
     if (roomId) {
       const isMember = await roomModel.isMember(roomId, req.userId);
       if (!isMember) {
         return res.status(403).json({ error: 'Not a member of this room' });
       }
     }
-
+    
     const message = await messageModel.create({
       roomId,
       taskId,
       userId: req.userId,
-      content,
+      content: content.trim(),
       type: type || 'text',
       fileUrl,
       replyTo,
     });
-
-    // Publish event
+    
     if (roomId) {
-      await redis.publish(`room:${roomId}`, JSON.stringify({
+      await roomModel.updateLastActivity(roomId);
+      
+      logger.info({ roomId, messageId: message.id, senderId: req.userId }, 'Broadcasting new message');
+      
+      // КРИТИЧНО: Добавить excludeUserId чтобы не отправлять отправителю
+      await eventEmitter.publish(`room:${roomId}`, {
         type: 'new_message',
         data: message,
-      }));
+        _channel: `room:${roomId}`,
+        _excludeUserId: req.userId, // НЕ отправлять отправителю
+      });
     }
-
-    if (taskId) {
-      await redis.publish(`task:${taskId}`, JSON.stringify({
-        type: 'comment_added',
-        data: message,
-      }));
-    }
-
-    logger.info({ messageId: message.id, roomId, taskId }, 'Message sent');
-
+    
+    logger.info({ messageId: message.id, roomId, userId: req.userId }, 'Message sent');
+    
     res.status(201).json(message);
   } catch (error) {
-    logger.error({ error: error.message }, 'Send message error');
-    res.status(500).json({ error: 'Failed to send message' });
+    logger.error({ error: error.message, stack: error.stack, body: req.body }, 'Send message error');
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 };
 
-// Mark as read
-exports.markAsRead = async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const { messageIds } = req.body;
-
-    if (!Array.isArray(messageIds) || messageIds.length === 0) {
-      return res.status(400).json({ error: 'messageIds array is required' });
-    }
-
-    await messageModel.markAsRead(messageIds, req.userId);
-
-    // Publish event
-    await redis.publish(`room:${roomId}`, JSON.stringify({
-      type: 'messages_read',
-      data: { userId: req.userId, messageIds },
-    }));
-
-    res.json({ success: true });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Mark as read error');
-    res.status(500).json({ error: 'Failed to mark as read' });
-  }
-};
-
-// Delete message
-exports.deleteMessage = async (req, res) => {
-  try {
-    const { messageId } = req.params;
-
-    const message = await messageModel.findById(messageId);
-    if (!message) {
-      return res.status(404).json({ error: 'Message not found' });
-    }
-
-    if (message.user_id !== req.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
-
-    await messageModel.delete(messageId);
-
-    // Publish event
-    if (message.room_id) {
-      await redis.publish(`room:${message.room_id}`, JSON.stringify({
-        type: 'message_deleted',
-        data: { messageId },
-      }));
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Delete message error');
-    res.status(500).json({ error: 'Failed to delete message' });
-  }
-};
-
-// Update message
 exports.updateMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
     const { content } = req.body;
-
+    
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ error: 'Message content required' });
+    }
+    
     const message = await messageModel.findById(messageId);
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
     }
-
+    
     if (message.user_id !== req.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+      return res.status(403).json({ error: 'Not authorized to edit this message' });
     }
-
-    const updated = await messageModel.update(messageId, { content });
-
-    // Publish event
+    
+    const updated = await messageModel.update(messageId, { content: content.trim() });
+    
+    logger.info({ messageId, userId: req.userId }, 'Message updated');
+    
     if (message.room_id) {
-      await redis.publish(`room:${message.room_id}`, JSON.stringify({
+      await eventEmitter.publish(`room:${message.room_id}`, {
         type: 'message_updated',
         data: updated,
-      }));
+        _channel: `room:${message.room_id}`,
+      });
     }
-
+    
     res.json(updated);
   } catch (error) {
     logger.error({ error: error.message }, 'Update message error');
-    res.status(500).json({ error: 'Failed to update message' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Search messages
+exports.deleteMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    
+    const message = await messageModel.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+    
+    if (message.user_id !== req.userId) {
+      return res.status(403).json({ error: 'Not authorized to delete this message' });
+    }
+    
+    await messageModel.delete(messageId);
+    
+    logger.info({ messageId, userId: req.userId }, 'Message deleted');
+    
+    if (message.room_id) {
+      await eventEmitter.publish(`room:${message.room_id}`, {
+        type: 'message_deleted',
+        data: { messageId },
+        _channel: `room:${message.room_id}`,
+      });
+    }
+    
+    res.json({ message: 'Message deleted' });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Delete message error');
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+exports.markAsRead = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { messageIds } = req.body;
+    
+    if (!messageIds || !Array.isArray(messageIds)) {
+      return res.status(400).json({ error: 'messageIds array required' });
+    }
+    
+    await messageModel.markAsRead(messageIds, req.userId);
+    
+    logger.info({ roomId, userId: req.userId, count: messageIds.length }, 'Messages marked as read');
+    
+    await eventEmitter.publish(`room:${roomId}`, {
+      type: 'messages_read',
+      data: { userId: req.userId, messageIds },
+      _channel: `room:${roomId}`,
+    });
+    
+    res.json({ message: 'Messages marked as read' });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Mark as read error');
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 exports.searchMessages = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { query } = req.query;
-
-    if (!query) {
-      return res.status(400).json({ error: 'Query is required' });
+    const { q } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({ error: 'Search query required' });
     }
-
-    const messages = await messageModel.search(roomId, query);
-
+    
+    const isMember = await roomModel.isMember(roomId, req.userId);
+    if (!isMember) {
+      return res.status(403).json({ error: 'Not a member of this room' });
+    }
+    
+    const messages = await messageModel.search(roomId, q);
+    
     res.json(messages);
   } catch (error) {
     logger.error({ error: error.message }, 'Search messages error');
-    res.status(500).json({ error: 'Failed to search messages' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Get unread count
 exports.getUnreadCount = async (req, res) => {
   try {
     const { roomId } = req.params;
-
+    
     const count = await messageModel.getUnreadCount(roomId, req.userId);
-
+    
     res.json({ count });
   } catch (error) {
     logger.error({ error: error.message }, 'Get unread count error');
-    res.status(500).json({ error: 'Failed to get unread count' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Get task comments
 exports.getTaskComments = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const before = req.query.before;
-    const limit = parseInt(req.query.limit) || 50;
-
-    let query = `
-      SELECT m.*, u.username, u.avatar_url
-      FROM messages m
-      JOIN users u ON m.user_id = u.id
-      WHERE m.task_id = $1
-    `;
+    const { limit } = req.query;
     
-    const params = [taskId];
-
-    if (before) {
-      query += ` AND m.created_at < $2`;
-      params.push(before);
-    }
-
-    query += ` ORDER BY m.created_at DESC LIMIT $${params.length + 1}`;
-    params.push(limit);
-
-    const { rows } = await postgres.query(query, params);
-
-    res.json(rows.reverse());
+    const comments = await messageModel.findByTaskId(taskId, {
+      limit: parseInt(limit) || 50,
+    });
+    
+    res.json(comments);
   } catch (error) {
     logger.error({ error: error.message }, 'Get task comments error');
-    res.status(500).json({ error: 'Failed to get comments' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Add task comment
 exports.addTaskComment = async (req, res) => {
   try {
     const { taskId } = req.params;
     const { content } = req.body;
-
-    if (!content || !content.trim()) {
-      return res.status(400).json({ error: 'Content is required' });
+    
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ error: 'Comment content required' });
     }
-
-    const { rows } = await postgres.query(
-      `INSERT INTO messages (task_id, user_id, content, type, created_at)
-       VALUES ($1, $2, $3, 'text', NOW())
-       RETURNING *`,
-      [taskId, req.userId, content]
-    );
-
-    const comment = rows[0];
-
-    // Get user info
-    const { rows: userRows } = await postgres.query(
-      'SELECT username, avatar_url FROM users WHERE id = $1',
-      [req.userId]
-    );
-
-    comment.username = userRows[0].username;
-    comment.avatar_url = userRows[0].avatar_url;
-
-    // Publish event
-    await redis.publish(`task:${taskId}`, JSON.stringify({
-      type: 'comment_added',
+    
+    const comment = await messageModel.create({
+      taskId,
+      userId: req.userId,
+      content: content.trim(),
+      type: 'text',
+    });
+    
+    logger.info({ taskId, userId: req.userId }, 'Task comment added');
+    
+    await eventEmitter.publish(`task:${taskId}`, {
+      type: 'new_comment',
       data: comment,
-    }));
-
-    logger.info({ taskId, commentId: comment.id }, 'Task comment added');
-
+      _channel: `task:${taskId}`,
+    });
+    
     res.status(201).json(comment);
   } catch (error) {
     logger.error({ error: error.message }, 'Add task comment error');
-    res.status(500).json({ error: 'Failed to add comment' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };

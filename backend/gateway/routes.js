@@ -8,7 +8,6 @@ const SERVICES = {
   auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
   chat: process.env.CHAT_SERVICE_URL || 'http://localhost:3002',
   task: process.env.TASK_SERVICE_URL || 'http://localhost:3003',
-  task: process.env.TASK_SERVICE_URL || 'http://localhost:3003',
 };
 
 async function proxyRequest(req, res, serviceUrl, servicePrefix) {
@@ -20,13 +19,16 @@ async function proxyRequest(req, res, serviceUrl, servicePrefix) {
       path = path.substring(servicePrefix.length);
     }
     
-    const url = `${serviceUrl}${path}`;
+    // Добавляем query string
+    const queryString = new URLSearchParams(req.query).toString();
+    const url = `${serviceUrl}${path}${queryString ? '?' + queryString : ''}`;
     
     console.log('========================================');
     console.log('PROXY REQUEST DEBUG:');
     console.log('Original Path:', req.path);
     console.log('Service Prefix:', servicePrefix);
     console.log('Final Path:', path);
+    console.log('Query:', req.query);
     console.log('Final URL:', url);
     console.log('Method:', req.method);
     console.log('Body:', req.body);
@@ -50,10 +52,8 @@ async function proxyRequest(req, res, serviceUrl, servicePrefix) {
     const response = await fetch(url, options);
     
     console.log('Response Status:', response.status);
-    console.log('Response Headers:', response.headers);
     
     const contentType = response.headers.get('content-type');
-    console.log('Content-Type:', contentType);
     
     if (contentType && contentType.includes('application/json')) {
       const data = await response.json();
@@ -72,20 +72,29 @@ async function proxyRequest(req, res, serviceUrl, servicePrefix) {
   }
 }
 
-// Auth routes
+// ============================================
+// PUBLIC AUTH ROUTES (no middleware)
+// ============================================
 router.post('/auth/register', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.post('/auth/login', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.post('/auth/refresh', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 
+// ============================================
+// PROTECTED ROUTES (require auth)
+// ============================================
 router.use(authMiddleware);
 
+// Auth protected routes
 router.get('/auth/verify', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.get('/auth/me', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.put('/auth/me', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.post('/auth/logout', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.get('/auth/users/search', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 
+// Chat routes
 router.all('/chat/*', (req, res) => proxyRequest(req, res, SERVICES.chat, '/chat'));
-router.all('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
 
-// Task - убираем префикс /task
+// Task routes
 router.all('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
 
 module.exports = router;

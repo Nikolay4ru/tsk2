@@ -6,6 +6,7 @@ const postgres = require('../../shared/database/postgres');
 const redis = require('../../shared/database/redis');
 const { hashPassword, comparePassword, generateToken } = require('../../shared/utils/crypto');
 const { schemas, validate } = require('../../shared/validation/schemas');
+const authMiddleware = require('../../shared/middleware/auth.middleware');
 const logger = require('../../shared/utils/logger');
 
 const app = express();
@@ -21,7 +22,6 @@ app.post('/register', async (req, res) => {
   try {
     const data = validate(schemas.register, req.body);
     
-    // Check if user exists
     const { rows: existing } = await postgres.query(
       'SELECT id FROM users WHERE email = $1',
       [data.email]
@@ -31,10 +31,8 @@ app.post('/register', async (req, res) => {
       return res.status(409).json({ error: 'User already exists' });
     }
     
-    // Hash password
     const passwordHash = await hashPassword(data.password);
     
-    // Create user
     const { rows } = await postgres.query(
       `INSERT INTO users (email, username, password_hash, status, created_at)
        VALUES ($1, $2, $3, 'online', NOW())
@@ -44,7 +42,6 @@ app.post('/register', async (req, res) => {
     
     const user = rows[0];
     
-    // Generate tokens
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email },
       JWT_SECRET,
@@ -55,7 +52,6 @@ app.post('/register', async (req, res) => {
     const refreshExpires = new Date();
     refreshExpires.setDate(refreshExpires.getDate() + 7);
     
-    // Save refresh token
     await postgres.query(
       'INSERT INTO sessions (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
       [user.id, refreshToken, refreshExpires]
@@ -83,7 +79,6 @@ app.post('/login', async (req, res) => {
   try {
     const data = validate(schemas.login, req.body);
     
-    // Find user
     const { rows } = await postgres.query(
       'SELECT * FROM users WHERE email = $1',
       [data.email]
@@ -95,19 +90,16 @@ app.post('/login', async (req, res) => {
     
     const user = rows[0];
     
-    // Verify password
     const isValid = await comparePassword(data.password, user.password_hash);
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    // Update status
     await postgres.query(
       'UPDATE users SET status = $1, last_seen = NOW() WHERE id = $2',
       ['online', user.id]
     );
     
-    // Generate tokens
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email },
       JWT_SECRET,
@@ -118,13 +110,11 @@ app.post('/login', async (req, res) => {
     const refreshExpires = new Date();
     refreshExpires.setDate(refreshExpires.getDate() + 7);
     
-    // Save refresh token
     await postgres.query(
       'INSERT INTO sessions (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)',
       [user.id, refreshToken, refreshExpires]
     );
     
-    // Store online status in Redis
     await redis.sadd('online_users', user.id);
     
     logger.info({ userId: user.id, email: user.email }, 'User logged in');
@@ -159,7 +149,6 @@ app.post('/refresh', async (req, res) => {
       return res.status(400).json({ error: 'Refresh token required' });
     }
     
-    // Verify refresh token
     const { rows } = await postgres.query(
       `SELECT s.*, u.email FROM sessions s
        JOIN users u ON s.user_id = u.id
@@ -173,7 +162,6 @@ app.post('/refresh', async (req, res) => {
     
     const session = rows[0];
     
-    // Generate new access token
     const accessToken = jwt.sign(
       { userId: session.user_id, email: session.email },
       JWT_SECRET,
@@ -188,7 +176,7 @@ app.post('/refresh', async (req, res) => {
   }
 });
 
-// Verify token (для внутреннего использования)
+// Verify token
 app.get('/verify', async (req, res) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
@@ -199,7 +187,6 @@ app.get('/verify', async (req, res) => {
     
     const decoded = jwt.verify(token, JWT_SECRET);
     
-    // Get user
     const { rows } = await postgres.query(
       'SELECT id, email, username, avatar_url, status FROM users WHERE id = $1',
       [decoded.userId]
@@ -220,6 +207,98 @@ app.get('/verify', async (req, res) => {
   }
 });
 
+// Get current user (protected)
+app.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await postgres.query(
+      'SELECT id, email, username, avatar_url, status, created_at FROM users WHERE id = $1',
+      [req.userId]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json(rows[0]);
+  } catch (error) {
+    logger.error(error, 'Get me error');
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update profile (protected)
+app.put('/me', authMiddleware, async (req, res) => {
+  try {
+    const { username, avatar_url } = req.body;
+    
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+    
+    if (username) {
+      updates.push(`username = $${paramIndex}`);
+      values.push(username);
+      paramIndex++;
+    }
+    
+    if (avatar_url !== undefined) {
+      updates.push(`avatar_url = $${paramIndex}`);
+      values.push(avatar_url);
+      paramIndex++;
+    }
+    
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    
+    values.push(req.userId);
+    
+    const { rows } = await postgres.query(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramIndex}
+       RETURNING id, email, username, avatar_url, status, created_at`,
+      values
+    );
+    
+    logger.info({ userId: req.userId }, 'Profile updated');
+    
+    res.json(rows[0]);
+  } catch (error) {
+    logger.error(error, 'Update profile error');
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Search users (protected)
+app.get('/users/search', authMiddleware, async (req, res) => {
+  try {
+    const { q } = req.query;
+    
+    logger.info({ query: q, userId: req.userId }, 'Searching users');
+    
+    if (!q || q.length < 2) {
+      return res.status(400).json({ error: 'Query must be at least 2 characters' });
+    }
+    
+    const { rows } = await postgres.query(
+      `SELECT id, username, email, avatar_url, status
+       FROM users
+       WHERE (username ILIKE $1 OR email ILIKE $1)
+       AND id != $2
+       ORDER BY username
+       LIMIT 20`,
+      [`%${q}%`, req.userId]
+    );
+    
+    logger.info({ query: q, count: rows.length }, 'Users found');
+    
+    res.json(rows);
+    
+  } catch (error) {
+    logger.error({ error: error.message, stack: error.stack }, 'Search users error');
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Logout
 app.post('/logout', async (req, res) => {
   try {
@@ -228,16 +307,13 @@ app.post('/logout', async (req, res) => {
     if (token) {
       const decoded = jwt.verify(token, JWT_SECRET);
       
-      // Update status
       await postgres.query(
         'UPDATE users SET status = $1, last_seen = NOW() WHERE id = $2',
         ['offline', decoded.userId]
       );
       
-      // Remove from Redis
       await redis.srem('online_users', decoded.userId);
       
-      // Invalidate refresh tokens
       await postgres.query(
         'DELETE FROM sessions WHERE user_id = $1',
         [decoded.userId]
@@ -259,7 +335,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'auth-service' });
 });
 
-const PORT = 3001 || 3001;
+const PORT = 3001;
 app.listen(PORT, () => {
   logger.info(`Auth service running on port ${PORT}`);
 });

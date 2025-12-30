@@ -1,62 +1,50 @@
-// frontend/src/shared/utils/helpers.js
-// ============================================
-
 export function formatTime(timestamp) {
   const date = new Date(timestamp);
   const now = new Date();
   const diff = now - date;
 
-  // Less than 1 minute
-  if (diff < 60000) {
-    return 'Just now';
-  }
-
-  // Today
-  if (date.toDateString() === now.toDateString()) {
+  // Today - show time
+  if (diff < 86400000 && date.getDate() === now.getDate()) {
     return date.toLocaleTimeString('en-US', { 
       hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false,
+      minute: '2-digit' 
     });
   }
 
   // Yesterday
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date.toDateString() === yesterday.toDateString()) {
-    return 'Yesterday';
-  }
-
-  // This week
-  if (diff < 7 * 24 * 60 * 60 * 1000) {
-    return date.toLocaleDateString('en-US', { weekday: 'short' });
-  }
-
-  // This year
-  if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric' 
+  if (diff < 172800000) {
+    return 'Yesterday ' + date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
     });
   }
 
-  // Older
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
+  // This week - show day
+  if (diff < 604800000) {
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short',
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  }
+
+  // Older - show date
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
     day: 'numeric',
+    hour: '2-digit', 
+    minute: '2-digit' 
   });
 }
 
 export function getInitials(name) {
   if (!name) return '?';
-  
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) {
-    return parts[0].substring(0, 2).toUpperCase();
-  }
-  
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return name
+    .split(' ')
+    .map(word => word[0])
+    .join('')
+    .toUpperCase()
+    .substring(0, 2);
 }
 
 export function escapeHtml(text) {

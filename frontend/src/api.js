@@ -1,6 +1,7 @@
+const API_BASE = '/api';
+
 class API {
   constructor() {
-    this.baseURL = window.location.origin + '/api';
     this.token = localStorage.getItem('accessToken');
   }
 
@@ -13,56 +14,49 @@ class API {
     }
   }
 
-  async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
-    
+  getAuthHeaders() {
     const headers = {
       'Content-Type': 'application/json',
-      ...options.headers,
     };
-
-    // КРИТИЧНО: Добавить токен в заголовок
+    
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
+    
+    return headers;
+  }
 
+  async request(endpoint, options = {}) {
+    const url = `${API_BASE}${endpoint}`;
+    
     const config = {
       ...options,
-      headers,
+      headers: {
+        ...this.getAuthHeaders(),
+        ...options.headers,
+      },
     };
 
-    console.log('🔵 API Request:', {
-      url,
-      method: config.method || 'GET',
-      hasToken: !!this.token,
-      tokenLength: this.token ? this.token.length : 0,
-      authHeader: headers['Authorization'] ? 'Bearer ***' : 'MISSING'
-    });
-
     try {
-      const response = await fetch(url, config);
+      console.log('📤 API Request:', url, config);
       
-      console.log('🟢 API Response:', {
-        url,
-        status: response.status,
-        ok: response.ok
-      });
+      const response = await fetch(url, config);
+
+      console.log('📥 API Response:', { url, status: response.status, ok: response.ok });
 
       if (response.status === 401) {
         console.warn('⚠️ Unauthorized - clearing token');
         this.setToken(null);
-        window.location.href = '/';
+        window.location.href = '/login';
         throw new Error('Unauthorized');
       }
 
-      const data = await response.json();
-
       if (!response.ok) {
-        console.error('🔴 API Error:', data);
-        throw data;
+        const error = await response.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(error.error || `HTTP ${response.status}`);
       }
 
-      return data;
+      return await response.json();
     } catch (error) {
       console.error('🔴 API Error:', error);
       throw error;
@@ -70,145 +64,106 @@ class API {
   }
 
   // Auth
-  register(email, username, password) {
-    return this.request('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, username, password }),
-    });
-  }
-
-  login(email, password) {
-    return this.request('/auth/login', {
+  async login(email, password) {
+    const data = await this.request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
+    
+    this.setToken(data.accessToken);
+    return data;
   }
 
-  logout() {
-    return this.request('/auth/logout', {
-      method: 'POST',
-    });
+  async logout() {
+    await this.request('/auth/logout', { method: 'POST' });
+    this.setToken(null);
   }
 
-  // Chat
-  getRooms() {
+  async getMe() {
+    return this.request('/auth/me');
+  }
+
+  // Rooms
+  async getRooms() {
     return this.request('/chat/rooms');
   }
 
-  getRoom(roomId) {
+  async getRoom(roomId) {
     return this.request(`/chat/rooms/${roomId}`);
   }
 
-  createRoom(data) {
+  async createRoom(data) {
     return this.request('/chat/rooms', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  createPrivateRoom(recipientId) {
-    return this.request('/chat/rooms/private', {
+  async addRoomMember(roomId, userId) {
+    return this.request(`/chat/rooms/${roomId}/members`, {
       method: 'POST',
-      body: JSON.stringify({ recipientId }),
+      body: JSON.stringify({ userId }),
     });
   }
 
-  getMessages(roomId, options = {}) {
-    const params = new URLSearchParams(options);
-    return this.request(`/chat/rooms/${roomId}/messages?${params}`);
+  // Messages
+  async getMessages(roomId, options = {}) {
+    const params = new URLSearchParams();
+    if (options.before) params.append('before', options.before);
+    if (options.after) params.append('after', options.after);
+    if (options.limit) params.append('limit', options.limit);
+    
+    const query = params.toString();
+    return this.request(`/chat/rooms/${roomId}/messages${query ? '?' + query : ''}`);
   }
 
-  sendMessage(data) {
+  async sendMessage(data) {
     return this.request('/chat/messages', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  markAsRead(roomId, messageIds) {
-    return this.request(`/chat/rooms/${roomId}/read`, {
+  async markAsRead(roomId, messageIds) {
+    return this.request(`/chat/rooms/${roomId}/messages/read`, {
       method: 'POST',
       body: JSON.stringify({ messageIds }),
     });
   }
 
-  deleteMessage(messageId) {
-    return this.request(`/chat/messages/${messageId}`, {
-      method: 'DELETE',
-    });
+  // Users
+  async searchUsers(query) {
+    return this.request(`/auth/users/search?q=${encodeURIComponent(query)}`);
   }
 
-  updateMessage(messageId, content) {
-    return this.request(`/chat/messages/${messageId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    });
-  }
-
-  // Task API
-  getTasks(filters = {}) {
+  // Tasks
+  async getTasks(filters = {}) {
     const params = new URLSearchParams(filters);
-    return this.request(`/task/tasks?${params}`);
+    const query = params.toString();
+    return this.request(`/task/tasks${query ? '?' + query : ''}`);
   }
 
-  getTask(taskId) {
+  async getTask(taskId) {
     return this.request(`/task/tasks/${taskId}`);
   }
 
-  getBoard(boardId = 'default') {
-    return this.request(`/task/boards/${boardId}`);
-  }
-
-  createTask(data) {
+  async createTask(data) {
     return this.request('/task/tasks', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  updateTask(taskId, data) {
+  async updateTask(taskId, data) {
     return this.request(`/task/tasks/${taskId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   }
 
-  updateTaskPosition(taskId, position, status) {
-    return this.request(`/task/tasks/${taskId}/position`, {
-      method: 'PATCH',
-      body: JSON.stringify({ position, status }),
-    });
-  }
-
-  deleteTask(taskId) {
+  async deleteTask(taskId) {
     return this.request(`/task/tasks/${taskId}`, {
       method: 'DELETE',
-    });
-  }
-
-  addWatcher(taskId, userId) {
-    return this.request(`/task/tasks/${taskId}/watchers`, {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
-  }
-
-  removeWatcher(taskId, userId) {
-    return this.request(`/task/tasks/${taskId}/watchers/${userId}`, {
-      method: 'DELETE',
-    });
-  }
-
-  // Task Comments
-  getTaskComments(taskId, options = {}) {
-    const params = new URLSearchParams(options);
-    return this.request(`/chat/tasks/${taskId}/comments?${params}`);
-  }
-
-  addTaskComment(taskId, content) {
-    return this.request(`/chat/tasks/${taskId}/comments`, {
-      method: 'POST',
-      body: JSON.stringify({ content }),
     });
   }
 }

@@ -2,82 +2,66 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#3390ec">
-  <meta name="description" content="ChatApp - Messaging, Tasks, and Collaboration">
-  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0e1621">
   <title>ChatApp</title>
-  
-  <!-- PWA -->
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="stylesheet" href="/styles.css">
-  <!-- Preload critical resources -->
-  <link rel="preload" href="/src/app.js" as="script" type="module">
-  
-  <style>
-    /* Critical CSS - inline for fast first paint */
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: #0e1621;
-      color: #fff;
-      overflow: hidden;
-    }
-    
-    #app {
-      width: 100vw;
-      height: 100vh;
-      height: 100dvh;
-      display: flex;
-      position: relative;
-    }
-    
-    /* Loading screen */
-    .loading-screen {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: #0e1621;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-    }
-    
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(51, 144, 236, 0.2);
-      border-top-color: #3390ec;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-  </style>
-  
-  <link rel="stylesheet" href="/src/shared/styles/variables.css">
-  <link rel="stylesheet" href="/src/shared/styles/reset.css">
-  <link rel="stylesheet" href="/src/shared/styles/components.css">
-  <link rel="stylesheet" href="/src/shared/styles/layout.css">
 </head>
 <body>
   <div id="app">
-    <div class="loading-screen">
-      <div class="spinner"></div>
-    </div>
+    <!-- Sidebar - Chat List -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <h2>ChatApp</h2>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <a href="/chat" class="nav-link" data-link>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Chats</span>
+        </a>
+        
+        <a href="/tasks" class="nav-link" data-link>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/>
+          </svg>
+          <span>Tasks</span>
+        </a>
+        
+        <a href="/settings" class="nav-link" data-link>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+          </svg>
+          <span>Settings</span>
+        </a>
+      </nav>
+      
+      <div class="sidebar-footer">
+        <button id="logout-btn" class="btn btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+          </svg>
+          Logout
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main id="main-content" class="main-content">
+      <div class="loading-screen">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+      </div>
+    </main>
   </div>
-  
-  <script type="module" src="/src/app.js"></script>
+
+  <script src="/bundle.js"></script>
 </body>
 </html>

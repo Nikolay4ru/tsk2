@@ -1,36 +1,43 @@
-// frontend/src/modules/chat/chat-window.js
-// ============================================
-
 import API from '../../api.js';
-import Router from '../../router.js';
-import WebSocket from '../../websocket.js';
 import { formatTime, getInitials, escapeHtml } from '../../shared/utils/helpers.js';
+import * as AddMemberModal from './add-member-modal.js';
 
 let currentRoomId = null;
 let messages = [];
 let loadingMore = false;
 let typingTimeout = null;
+let typingUsers = new Set();
 let room = null;
 
 export async function init(roomId) {
   currentRoomId = roomId;
-  console.log('Opening chat:', roomId);
+  
+  console.log('🟢 Opening chat:', roomId);
 
   const mainContent = document.getElementById('main-content');
+  mainContent.classList.add('mobile-chat-active');
   mainContent.innerHTML = `
     <div class="chat-window">
       <header class="chat-header">
-        <button class="back-btn">←</button>
+        <button class="back-btn mobile-only" id="chat-back-btn">←</button>
         <div class="avatar" id="chat-avatar"></div>
         <div class="chat-info">
           <h2 class="chat-name" id="chat-name">Loading...</h2>
           <span class="chat-status" id="chat-status"></span>
         </div>
+        <button class="btn-icon" id="add-member-btn" title="Add member">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="8.5" cy="7" r="4"/>
+            <line x1="20" y1="8" x2="20" y2="14"/>
+            <line x1="23" y1="11" x2="17" y2="11"/>
+          </svg>
+        </button>
         <button class="btn-icon" id="chat-menu-btn">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="5" r="1"/>
             <circle cx="12" cy="12" r="1"/>
-            <circle cx="12" cy="19" r="1"/>
+            <circle cx="12" cy="6" r="1"/>
+            <circle cx="12" cy="18" r="1"/>
           </svg>
         </button>
       </header>
@@ -46,7 +53,12 @@ export async function init(roomId) {
           placeholder="Type a message..."
           rows="1"
         ></textarea>
-        <button id="send-btn" class="send-btn" disabled>
+        <button 
+          type="submit" 
+          class="btn btn-primary btn-icon" 
+          id="send-btn"
+          title="Send message"
+        >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
           </svg>
@@ -55,54 +67,62 @@ export async function init(roomId) {
     </div>
   `;
 
-  // Load room info and messages
+  if (window.innerWidth <= 768) {
+    mainContent.classList.add('mobile-chat-active');
+  }
+
   await Promise.all([
     loadRoomInfo(),
     loadMessages(),
   ]);
 
-  // Subscribe to room updates
-  WebSocket.subscribe(`room:${roomId}`);
-
-  // Setup event listeners
+  await connectWebSocket();
   setupEventListeners();
-
-  // Listen for WebSocket events
   window.addEventListener('ws:event', handleWebSocketEvent);
 
-  // Focus input
-  document.getElementById('message-input').focus();
+  if (window.innerWidth > 768) {
+    document.getElementById('message-input').focus();
+  }
+}
 
-  // Cleanup on navigation
-  window.addEventListener('beforeunload', cleanup);
+async function connectWebSocket() {
+  try {
+    console.log('🟡 Connecting to WebSocket...');
+    
+    if (!window.app.ws) {
+      console.error('❌ WebSocket manager not initialized');
+      return;
+    }
+    
+    if (!window.app.ws.ws || window.app.ws.ws.readyState !== WebSocket.OPEN) {
+      await window.app.ws.connect();
+    }
+    
+    console.log('🟡 Subscribing to room:', currentRoomId);
+    window.app.ws.subscribe(`room:${currentRoomId}`);
+    
+    console.log('✅ WebSocket connected and subscribed');
+  } catch (error) {
+    console.error('❌ Failed to connect WebSocket:', error);
+  }
 }
 
 async function loadRoomInfo() {
   try {
     room = await API.getRoom(currentRoomId);
     
-    let roomName = room.name;
-    let avatarText = '';
-    let statusText = '';
+    let roomName = room.name || 'Chat';
+    let avatarText = getInitials(roomName);
+    let statusText = `${room.member_count || 0} members`;
 
-    if (room.type === 'private' && room.members) {
-      const otherMember = room.members.find(m => m.id !== window.app.user.id);
-      if (otherMember) {
-        roomName = otherMember.username;
-        avatarText = getInitials(otherMember.username);
-        statusText = otherMember.status === 'online' ? 'Online' : 'Offline';
-      }
-    } else if (room.members) {
-      avatarText = getInitials(room.name || 'Group');
-      statusText = `${room.members.length} members`;
-    }
-
-    document.getElementById('chat-name').textContent = roomName || 'Unnamed Chat';
+    document.getElementById('chat-name').textContent = roomName;
     document.getElementById('chat-avatar').textContent = avatarText;
     document.getElementById('chat-status').textContent = statusText;
     
+    console.log('Room loaded:', room);
   } catch (error) {
     console.error('Failed to load room info:', error);
+    document.getElementById('chat-name').textContent = 'Unknown Room';
   }
 }
 
@@ -127,21 +147,59 @@ async function loadMessages(before = null) {
     if (!before) {
       scrollToBottom(false);
       
-      // Mark all as read
       const unreadIds = messages
         .filter(m => !m.is_read && m.user_id !== window.app.user.id)
         .map(m => m.id);
       
       if (unreadIds.length > 0) {
-        await API.markAsRead(currentRoomId, unreadIds);
+        await API.markAsRead(currentRoomId, unreadIds).catch(console.error);
       }
     }
 
   } catch (error) {
     console.error('Failed to load messages:', error);
+    
+    const container = document.getElementById('messages');
+    container.innerHTML = `
+      <div class="empty-state">
+        <p class="text-danger">Failed to load messages</p>
+        <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+      </div>
+    `;
   } finally {
     loadingMore = false;
   }
+}
+
+function getMessageStatus(msg) {
+  if (msg.pending) {
+    return `
+      <span class="message-status pending">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 13A6 6 0 1 1 8 2a6 6 0 0 1 0 12zm3.5-6a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 1 0v3.5H11a.5.5 0 0 1 .5.5z"/>
+        </svg>
+      </span>
+    `;
+  }
+  
+  if (msg.is_read) {
+    return `
+      <span class="message-status read" title="Read">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1.5 8.5l3 3 8-8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4.5 8.5l3 3 8-8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+    `;
+  }
+  
+  return `
+    <span class="message-status" title="Sent">
+      <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+        <path d="M1.5 8.5l3 3 8-8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+  `;
 }
 
 function renderMessages() {
@@ -159,9 +217,12 @@ function renderMessages() {
     return;
   }
 
-  container.innerHTML = messages.map(msg => {
-    const isOwn = msg.user_id === window.app.user.id;
+  const currentUserId = window.app.user.id;
+  
+  let html = messages.map(msg => {
+    const isOwn = msg.user_id === currentUserId;
     const avatarText = getInitials(msg.username || 'User');
+    const statusHtml = isOwn ? getMessageStatus(msg) : '';
 
     return `
       <div class="message ${isOwn ? 'own' : ''} ${msg.pending ? 'pending' : ''}" data-id="${msg.id}">
@@ -169,80 +230,94 @@ function renderMessages() {
         <div class="message-content">
           ${!isOwn ? `<span class="username">${escapeHtml(msg.username)}</span>` : ''}
           <div class="message-text">${escapeHtml(msg.content)}</div>
-          <span class="message-time">${formatTime(msg.created_at)}</span>
+          <span class="message-time">
+            ${formatTime(msg.created_at)}
+            ${statusHtml}
+          </span>
         </div>
       </div>
     `;
   }).join('');
+  
+  if (typingUsers.size > 0) {
+    html += `
+      <div class="typing-indicator" id="typing-indicator">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+    `;
+  }
+  
+  container.innerHTML = html;
 
-  // Restore scroll position if loading more
   if (scrollTop > 0) {
     container.scrollTop = container.scrollHeight - scrollHeight + scrollTop;
-  }
-
-  // Infinite scroll
-  container.addEventListener('scroll', handleScroll, { passive: true });
-}
-
-function handleScroll() {
-  const container = document.getElementById('messages');
-  
-  if (container.scrollTop < 100 && !loadingMore && messages.length >= 50) {
-    loadMessages(messages[0].created_at);
   }
 }
 
 function setupEventListeners() {
   const input = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
-  const backBtn = document.querySelector('.back-btn');
+  const backBtn = document.getElementById('chat-back-btn');
+  const addMemberBtn = document.getElementById('add-member-btn');
 
-  // Auto-resize textarea
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 120) + 'px';
     
-    // Enable/disable send button
-    sendBtn.disabled = !input.value.trim();
+    const hasText = input.value.trim().length > 0;
+    sendBtn.disabled = !hasText;
   });
 
-  // Send message
-  sendBtn.addEventListener('click', sendMessage);
-  
+  sendBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await sendMessage();
+  });
+
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) {
       e.preventDefault();
       sendMessage();
     }
   });
 
-  // Typing indicator
+  let isTyping = false;
   input.addEventListener('input', () => {
-    WebSocket.sendTyping(currentRoomId, true);
-    
-    clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => {
-      WebSocket.sendTyping(currentRoomId, false);
-    }, 1000);
+    if (window.app.ws && window.app.ws.sendTyping) {
+      if (!isTyping) {
+        isTyping = true;
+        window.app.ws.sendTyping(currentRoomId, true);
+      }
+      
+      clearTimeout(typingTimeout);
+      typingTimeout = setTimeout(() => {
+        isTyping = false;
+        window.app.ws.sendTyping(currentRoomId, false);
+      }, 1000);
+    }
   });
 
-  // Back button
-  backBtn.addEventListener('click', () => {
-    Router.navigate('/chat');
-  });
-
-  // Mobile keyboard handling
-  if ('visualViewport' in window) {
-    window.visualViewport.addEventListener('resize', () => {
-      const viewportHeight = window.visualViewport.height;
-      document.documentElement.style.setProperty('--viewport-height', `${viewportHeight}px`);
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      cleanup();
+      
+      const mainContent = document.getElementById('main-content');
+      if (mainContent) {
+        mainContent.classList.remove('mobile-chat-active');
+      }
+      
+      window.app.router.navigate('/chat');
     });
   }
 
-  // Auto-scroll on input focus (mobile)
-  input.addEventListener('focus', () => {
-    setTimeout(() => scrollToBottom(true), 300);
-  });
+  if (addMemberBtn) {
+    addMemberBtn.addEventListener('click', () => {
+      AddMemberModal.show(currentRoomId);
+    });
+  }
+
+  sendBtn.disabled = true;
 }
 
 async function sendMessage() {
@@ -251,18 +326,16 @@ async function sendMessage() {
 
   if (!content) return;
 
-  // Clear input
   input.value = '';
   input.style.height = 'auto';
   document.getElementById('send-btn').disabled = true;
 
-  // Optimistic UI update
+  const tempId = 'temp-' + Date.now();
   const tempMessage = {
-    id: 'temp-' + Date.now(),
+    id: tempId,
     room_id: currentRoomId,
     user_id: window.app.user.id,
     username: window.app.user.username,
-    avatar_url: window.app.user.avatar_url,
     content,
     created_at: new Date().toISOString(),
     pending: true,
@@ -273,24 +346,27 @@ async function sendMessage() {
   scrollToBottom(true);
 
   try {
+    console.log('📤 Sending message:', { roomId: currentRoomId, content });
+
     const sentMessage = await API.sendMessage({
       roomId: currentRoomId,
       content,
       type: 'text',
     });
 
-    // Replace temp message with real one
-    const index = messages.findIndex(m => m.id === tempMessage.id);
+    console.log('✅ Message sent:', sentMessage);
+
+    // КРИТИЧНО: Заменить временное сообщение на реальное
+    const index = messages.findIndex(m => m.id === tempId);
     if (index !== -1) {
       messages[index] = sentMessage;
       renderMessages();
     }
 
   } catch (error) {
-    console.error('Failed to send message:', error);
+    console.error('❌ Failed to send message:', error);
     
-    // Remove failed message
-    messages = messages.filter(m => m.id !== tempMessage.id);
+    messages = messages.filter(m => m.id !== tempId);
     renderMessages();
     
     alert('Failed to send message');
@@ -299,6 +375,8 @@ async function sendMessage() {
 
 function handleWebSocketEvent(event) {
   const { channel, data } = event.detail;
+  
+  console.log('📨 WebSocket event:', channel, data.type, data.data);
 
   if (channel === `room:${currentRoomId}`) {
     switch (data.type) {
@@ -317,15 +395,32 @@ function handleWebSocketEvent(event) {
       case 'message_updated':
         handleMessageUpdated(data.data);
         break;
+        
+      case 'typing':
+        handleTypingIndicator(data.data);
+        break;
     }
-  } else if (channel === `room:${currentRoomId}:typing`) {
-    handleTypingIndicator(data);
   }
 }
 
 function handleNewMessage(message) {
-  // Avoid duplicates
-  if (messages.find(m => m.id === message.id)) return;
+  console.log('📬 New message received:', message);
+  
+  // КРИТИЧНО: Проверить дубликаты
+  // Если это сообщение от текущего пользователя и оно уже есть - пропустить
+  if (message.user_id === window.app.user.id) {
+    const exists = messages.find(m => m.id === message.id);
+    if (exists) {
+      console.log('⏭️ Own message already exists, skipping');
+      return;
+    }
+  }
+  
+  // Для других пользователей - просто проверить по ID
+  if (messages.find(m => m.id === message.id)) {
+    console.log('⏭️ Message already exists, skipping');
+    return;
+  }
 
   messages.push(message);
   renderMessages();
@@ -337,23 +432,34 @@ function handleNewMessage(message) {
     scrollToBottom(true);
   }
 
-  // Mark as read if from another user
   if (message.user_id !== window.app.user.id) {
-    API.markAsRead(currentRoomId, [message.id]);
+    API.markAsRead(currentRoomId, [message.id]).catch(console.error);
   }
 }
 
 function handleMessagesRead({ userId, messageIds }) {
-  if (userId === window.app.user.id) return;
+  console.log('📖 Messages read:', { userId, messageIds });
+  
+  // Не обрабатывать свои собственные read events
+  if (userId === window.app.user.id) {
+    console.log('⏭️ Own read event, skipping');
+    return;
+  }
 
+  let updated = false;
   messageIds.forEach(id => {
     const message = messages.find(m => m.id === id);
-    if (message) {
+    if (message && !message.is_read) {
       message.is_read = true;
+      updated = true;
+      console.log('✅ Marked message as read:', id);
     }
   });
-
-  // Update UI if needed (e.g., show read receipts)
+  
+  if (updated) {
+    console.log('🔄 Re-rendering messages with updated read status');
+    renderMessages();
+  }
 }
 
 function handleMessageDeleted({ messageId }) {
@@ -369,24 +475,32 @@ function handleMessageUpdated(updatedMessage) {
   }
 }
 
-function handleTypingIndicator({ userId, username, isTyping }) {
+function handleTypingIndicator(data) {
+  const { userId, username, isTyping } = data;
+  
+  console.log('⌨️ Typing indicator:', { userId, username, isTyping });
+  
   if (userId === window.app.user.id) return;
 
   const statusEl = document.getElementById('chat-status');
   
   if (isTyping) {
-    statusEl.textContent = 'typing...';
-    statusEl.style.color = 'var(--color-primary)';
+    typingUsers.add(username || 'Someone');
+    statusEl.textContent = `${username || 'Someone'} is typing...`;
+    statusEl.classList.add('typing');
   } else {
-    // Restore original status
-    if (room && room.type === 'private') {
-      const otherMember = room.members?.find(m => m.id !== window.app.user.id);
-      statusEl.textContent = otherMember?.status === 'online' ? 'Online' : 'Offline';
+    typingUsers.delete(username || 'Someone');
+    
+    if (typingUsers.size === 0) {
+      statusEl.textContent = `${room?.member_count || 0} members`;
+      statusEl.classList.remove('typing');
     } else {
-      statusEl.textContent = room?.members ? `${room.members.length} members` : '';
+      const names = Array.from(typingUsers);
+      statusEl.textContent = `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing...`;
     }
-    statusEl.style.color = '';
   }
+  
+  renderMessages();
 }
 
 function scrollToBottom(smooth = false) {
@@ -402,7 +516,13 @@ function scrollToBottom(smooth = false) {
 }
 
 function cleanup() {
-  WebSocket.unsubscribe(`room:${currentRoomId}`);
+  console.log('🧹 Cleaning up chat window');
+  
+  if (window.app.ws && window.app.ws.unsubscribe) {
+    window.app.ws.unsubscribe(`room:${currentRoomId}`);
+  }
+  
   window.removeEventListener('ws:event', handleWebSocketEvent);
   clearTimeout(typingTimeout);
+  typingUsers.clear();
 }

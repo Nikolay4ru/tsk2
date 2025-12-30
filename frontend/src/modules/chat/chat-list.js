@@ -1,71 +1,50 @@
 import API from '../../api.js';
+import { formatTime, getInitials, escapeHtml } from '../../shared/utils/helpers.js';
 
 let rooms = [];
+let typingStatus = new Map();
 
 export async function init() {
-  console.log('Initializing chat list...');
+  console.log('🟢 Initializing chat list');
 
-  const app = document.getElementById('app');
-  app.innerHTML = `
-    <div class="app-container">
-      <aside class="sidebar">
-        <header class="sidebar-header">
-          <h1 class="sidebar-title">Chats</h1>
-          <div class="flex gap-sm">
-            <button class="btn-icon" id="new-chat-btn" title="New chat">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-            </button>
-            <button class="btn-icon" id="tasks-btn" title="Tasks">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 11l3 3L22 4"/>
-                <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
-              </svg>
-            </button>
-            <button class="btn-icon" id="logout-btn" title="Logout">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-            </button>
-          </div>
-        </header>
-        
-        <div class="sidebar-content">
-          <div id="chat-list" class="chat-list">
-            <div class="loading">Loading chats...</div>
-          </div>
-        </div>
-      </aside>
+  const mainContent = document.getElementById('main-content');
+  
+  // Clear mobile-chat-active class
+  mainContent.classList.remove('mobile-chat-active');
+  
+  mainContent.innerHTML = `
+    <div class="chat-list-container">
+      <header class="chat-list-header">
+        <h1>Chats</h1>
+        <button class="btn btn-primary" id="new-chat-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          New Chat
+        </button>
+      </header>
       
-      <main class="main-content" id="main-content">
-        <div class="empty-state">
-          <div class="empty-state-icon">💬</div>
-          <h2>Select a chat to start messaging</h2>
-          <p>Or create a new chat to get started</p>
-        </div>
-      </main>
+      <div class="chat-list" id="chat-list">
+        <div class="loading">Loading chats...</div>
+      </div>
     </div>
   `;
 
-  // Load chats
   await loadRooms();
-
-  // Setup event listeners
   setupEventListeners();
+  subscribeToRooms();
+  window.addEventListener('ws:event', handleWebSocketEvent);
 }
 
 async function loadRooms() {
   try {
-    console.log('Loading rooms...');
     rooms = await API.getRooms();
     console.log('Rooms loaded:', rooms);
     renderRooms();
   } catch (error) {
     console.error('Failed to load rooms:', error);
-    document.getElementById('chat-list').innerHTML = `
+    const container = document.getElementById('chat-list');
+    container.innerHTML = `
       <div class="empty-state">
         <p class="text-danger">Failed to load chats</p>
         <button class="btn btn-primary" onclick="location.reload()">Retry</button>
@@ -80,31 +59,55 @@ function renderRooms() {
   if (rooms.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">📭</div>
-        <h3>No chats yet</h3>
-        <p>Create your first chat!</p>
+        <div class="empty-state-icon">💬</div>
+        <p>No chats yet</p>
+        <button class="btn btn-primary" id="new-chat-empty">Start a conversation</button>
       </div>
     `;
+    document.getElementById('new-chat-empty')?.addEventListener('click', showNewChatModal);
     return;
   }
 
-  container.innerHTML = rooms.map(room => `
-    <div class="chat-item" data-room-id="${room.id}">
-      <div class="avatar">${getInitials(room.name)}</div>
-      <div class="chat-item-content">
-        <div class="chat-item-header">
-          <h3 class="chat-item-title">${escapeHtml(room.name)}</h3>
-          <span class="chat-item-time">${room.last_message_at ? formatTime(room.last_message_at) : ''}</span>
-        </div>
-        <p class="chat-item-message">
-          ${room.last_message ? escapeHtml(room.last_message) : 'No messages yet'}
-        </p>
-      </div>
-      ${room.unread_count > 0 ? `<span class="badge">${room.unread_count}</span>` : ''}
-    </div>
-  `).join('');
+  container.innerHTML = rooms.map(room => {
+    const roomName = room.name || 'Chat';
+    const avatarText = getInitials(roomName);
+    
+    let lastMessageText = '';
+    if (room.last_message) {
+      if (typeof room.last_message === 'object') {
+        lastMessageText = room.last_message.content || '';
+      } else {
+        lastMessageText = room.last_message;
+      }
+    }
+    
+    const isTyping = typingStatus.has(room.id);
+    const typingUser = typingStatus.get(room.id);
+    const unreadCount = room.unread_count || 0;
+    const unreadBadge = unreadCount > 0 
+      ? `<span class="badge">${unreadCount > 99 ? '99+' : unreadCount}</span>` 
+      : '';
 
-  // Add click listeners
+    return `
+      <div class="chat-item" data-room-id="${room.id}">
+        <div class="avatar">${avatarText}</div>
+        <div class="chat-item-content">
+          <div class="chat-item-header">
+            <span class="chat-item-name">${escapeHtml(roomName)}</span>
+            <span class="chat-item-time">${room.updated_at ? formatTime(room.updated_at) : ''}</span>
+          </div>
+          <div class="chat-item-message ${isTyping ? 'typing' : ''}">
+            ${isTyping 
+              ? `<span class="typing-text">${escapeHtml(typingUser)} is typing...</span>`
+              : escapeHtml(lastMessageText || 'No messages yet')
+            }
+          </div>
+        </div>
+        ${unreadBadge}
+      </div>
+    `;
+  }).join('');
+
   document.querySelectorAll('.chat-item').forEach(item => {
     item.addEventListener('click', () => {
       const roomId = item.dataset.roomId;
@@ -114,41 +117,37 @@ function renderRooms() {
 }
 
 function setupEventListeners() {
-  document.getElementById('new-chat-btn').addEventListener('click', showNewChatModal);
-  document.getElementById('tasks-btn').addEventListener('click', () => {
-    window.app.router.navigate('/tasks');
-  });
-  document.getElementById('logout-btn').addEventListener('click', () => {
-    window.app.logout();
-  });
+  const newChatBtn = document.getElementById('new-chat-btn');
+  if (newChatBtn) {
+    newChatBtn.addEventListener('click', showNewChatModal);
+  }
 }
 
 function showNewChatModal() {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
+  modal.id = 'new-chat-modal';
   modal.innerHTML = `
-    <div class="modal" style="max-width: 400px;">
+    <div class="modal">
       <div class="modal-header">
-        <h2 class="modal-title">New Chat</h2>
-        <button class="modal-close">×</button>
+        <h2>New Chat</h2>
+        <button class="btn-icon" id="close-modal">×</button>
       </div>
       <div class="modal-body">
-        <form id="new-chat-form">
-          <div class="form-group">
-            <label for="chat-name">Chat Name</label>
-            <input type="text" id="chat-name" name="name" class="input" placeholder="Enter chat name" required />
-          </div>
-          <div class="form-group">
-            <label for="chat-type">Type</label>
-            <select id="chat-type" name="type" class="input">
-              <option value="group">Group</option>
-              <option value="private">Private</option>
-            </select>
-          </div>
-        </form>
+        <div class="form-group">
+          <label>Chat Name</label>
+          <input type="text" id="chat-name" class="input" placeholder="Enter chat name" />
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <select id="chat-type" class="input">
+            <option value="group">Group</option>
+            <option value="private">Private</option>
+          </select>
+        </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="cancel-btn">Cancel</button>
+        <button class="btn" id="cancel-btn">Cancel</button>
         <button class="btn btn-primary" id="create-btn">Create</button>
       </div>
     </div>
@@ -156,67 +155,102 @@ function showNewChatModal() {
 
   document.body.appendChild(modal);
 
-  const form = modal.querySelector('#new-chat-form');
+  document.getElementById('close-modal').addEventListener('click', () => modal.remove());
+  document.getElementById('cancel-btn').addEventListener('click', () => modal.remove());
+  document.getElementById('create-btn').addEventListener('click', async () => {
+    const name = document.getElementById('chat-name').value.trim();
+    const type = document.getElementById('chat-type').value;
 
-  modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
-  modal.querySelector('#cancel-btn').addEventListener('click', () => modal.remove());
-  
-  modal.querySelector('#create-btn').addEventListener('click', async () => {
-    if (!form.checkValidity()) {
-      form.reportValidity();
+    if (!name) {
+      alert('Please enter a chat name');
       return;
     }
 
-    const formData = new FormData(form);
-    const data = {
-      name: formData.get('name'),
-      type: formData.get('type'),
-    };
-
     try {
-      const room = await API.createRoom(data);
-      rooms.unshift(room);
-      renderRooms();
+      const room = await API.createRoom({ name, type, encrypted: false });
       modal.remove();
-      
-      // Navigate to new chat
       window.app.router.navigate(`/chat/${room.id}`);
     } catch (error) {
-      console.error('Failed to create chat:', error);
+      console.error('Failed to create room:', error);
       alert('Failed to create chat');
     }
   });
+}
 
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      modal.remove();
-    }
+function subscribeToRooms() {
+  if (!window.app.ws) return;
+  rooms.forEach(room => {
+    window.app.ws.subscribe(`room:${room.id}`);
   });
+  console.log('✅ Subscribed to', rooms.length, 'rooms');
 }
 
-function getInitials(name) {
-  return name
-    .split(' ')
-    .map(word => word[0])
-    .join('')
-    .toUpperCase()
-    .substring(0, 2);
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function formatTime(timestamp) {
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diff = now - date;
-
-  if (diff < 60000) return 'just now';
-  if (diff < 3600000) return Math.floor(diff / 60000) + 'm';
-  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h';
+function handleWebSocketEvent(event) {
+  const { channel, data } = event.detail;
+  const match = channel.match(/^room:(.+)$/);
+  if (!match) return;
   
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const roomId = match[1];
+  
+  switch (data.type) {
+    case 'new_message':
+      handleNewMessage(roomId, data.data);
+      break;
+    case 'typing':
+      handleTyping(roomId, data.data);
+      break;
+    case 'messages_read':
+      handleMessagesRead(roomId, data.data);
+      break;
+  }
+}
+
+function handleNewMessage(roomId, message) {
+  const room = rooms.find(r => r.id === roomId);
+  if (!room) return;
+  
+  room.last_message = { content: message.content, created_at: message.created_at };
+  room.updated_at = message.created_at;
+  
+  if (message.user_id !== window.app.user.id) {
+    room.unread_count = (room.unread_count || 0) + 1;
+  }
+  
+  rooms = [room, ...rooms.filter(r => r.id !== roomId)];
+  typingStatus.delete(roomId);
+  renderRooms();
+}
+
+function handleTyping(roomId, data) {
+  const { userId, username, isTyping } = data;
+  if (userId === window.app.user.id) return;
+  
+  if (isTyping) {
+    typingStatus.set(roomId, username);
+  } else {
+    typingStatus.delete(roomId);
+  }
+  renderRooms();
+}
+
+function handleMessagesRead(roomId, data) {
+  const { userId, messageIds } = data;
+  if (userId !== window.app.user.id) return;
+  
+  const room = rooms.find(r => r.id === roomId);
+  if (!room) return;
+  
+  room.unread_count = Math.max(0, (room.unread_count || 0) - messageIds.length);
+  renderRooms();
+}
+
+export function cleanup() {
+  console.log('🧹 Cleaning up chat list');
+  if (window.app.ws) {
+    rooms.forEach(room => {
+      window.app.ws.unsubscribe(`room:${room.id}`);
+    });
+  }
+  window.removeEventListener('ws:event', handleWebSocketEvent);
+  typingStatus.clear();
 }

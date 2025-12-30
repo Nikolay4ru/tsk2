@@ -1,3 +1,4 @@
+//chat-service/index.js
 require('dotenv').config({ path: '/var/www/chatapp/backend/.env' });
 const express = require('express');
 const roomController = require('./controllers/room.controller');
@@ -28,7 +29,8 @@ app.delete('/rooms/:roomId', roomController.deleteRoom);
 // Message routes
 app.get('/rooms/:roomId/messages', messageController.getMessages);
 app.post('/messages', messageController.sendMessage);
-app.post('/rooms/:roomId/read', messageController.markAsRead);
+app.post('/rooms/:roomId/messages/read', messageController.markAsRead);
+
 app.delete('/messages/:messageId', messageController.deleteMessage);
 app.put('/messages/:messageId', messageController.updateMessage);
 app.get('/rooms/:roomId/messages/search', messageController.searchMessages);

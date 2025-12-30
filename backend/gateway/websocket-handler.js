@@ -1,6 +1,3 @@
-// backend/gateway/websocket-handler.js
-// ============================================
-
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
@@ -18,8 +15,8 @@ class WebSocketHandler {
       clientTracking: true,
     });
     
-    this.clients = new Map(); // userId -> Set of WebSocket connections
-    this.subscriptions = new Map(); // connectionId -> Set of channels
+    this.clients = new Map();
+    this.subscriptions = new Map();
     
     this.init();
   }
@@ -27,19 +24,18 @@ class WebSocketHandler {
   init() {
     this.wss.on('connection', (ws, req) => this.handleConnection(ws, req));
     
-    // Heartbeat to detect dead connections
     this.heartbeatInterval = setInterval(() => {
       this.wss.clients.forEach((ws) => {
         if (ws.isAlive === false) {
+          logger.debug({ userId: ws.userId }, 'Terminating dead connection');
           this.handleDisconnect(ws);
           return ws.terminate();
         }
         ws.isAlive = false;
         ws.ping();
       });
-    }, 30000); // 30 seconds
+    }, 30000);
 
-    // Listen to Redis events and broadcast to relevant clients
     this.setupEventBroadcasting();
 
     logger.info('WebSocket server initialized');
@@ -49,13 +45,15 @@ class WebSocketHandler {
     const url = new URL(req.url, 'http://localhost');
     const token = url.searchParams.get('token');
 
+    logger.info('New WebSocket connection attempt');
+
     if (!token) {
+      logger.warn('WebSocket connection rejected: no token');
       ws.close(1008, 'Authentication required');
       return;
     }
 
     try {
-      // Verify JWT token
       const decoded = jwt.verify(token, JWT_SECRET);
       
       ws.userId = decoded.userId;
@@ -64,18 +62,27 @@ class WebSocketHandler {
       ws.isAlive = true;
       ws.subscriptions = new Set();
 
-      // Store connection
       if (!this.clients.has(ws.userId)) {
         this.clients.set(ws.userId, new Set());
       }
       this.clients.get(ws.userId).add(ws);
       this.subscriptions.set(ws.connectionId, new Set());
 
-      // Mark user as online
+      const postgres = require('../shared/database/postgres');
+      try {
+        const { rows } = await postgres.query(
+          'SELECT username FROM users WHERE id = $1',
+          [ws.userId]
+        );
+        ws.username = rows[0]?.username || ws.userEmail.split('@')[0];
+      } catch (error) {
+        ws.username = ws.userEmail.split('@')[0];
+        logger.error({ error: error.message }, 'Failed to fetch username');
+      }
+
       await redis.sadd('online_users', ws.userId);
       await this.publishUserStatus(ws.userId, 'online');
 
-      // Setup message handlers
       ws.on('pong', () => {
         ws.isAlive = true;
       });
@@ -86,16 +93,16 @@ class WebSocketHandler {
         logger.error({ userId: ws.userId, error: error.message }, 'WebSocket error');
       });
 
-      // Send connection confirmation
       this.send(ws, {
         type: 'connected',
         data: {
           connectionId: ws.connectionId,
           userId: ws.userId,
+          username: ws.username,
         },
       });
 
-      logger.info({ userId: ws.userId, connectionId: ws.connectionId }, 'WebSocket connected');
+      logger.info({ userId: ws.userId, username: ws.username, connectionId: ws.connectionId }, 'WebSocket connected');
 
     } catch (error) {
       logger.error({ error: error.message }, 'WebSocket authentication failed');
@@ -145,14 +152,13 @@ class WebSocketHandler {
       return;
     }
 
-    // Verify user has access to this channel
     const hasAccess = await this.verifyChannelAccess(ws.userId, channel);
     if (!hasAccess) {
+      logger.warn({ userId: ws.userId, channel }, 'Access denied to channel');
       this.send(ws, { type: 'error', data: { message: 'Access denied' } });
       return;
     }
 
-    // Add to subscriptions
     ws.subscriptions.add(channel);
     this.subscriptions.get(ws.connectionId).add(channel);
 
@@ -163,7 +169,7 @@ class WebSocketHandler {
       data: { channel } 
     });
 
-    logger.debug({ userId: ws.userId, channel }, 'Subscribed to channel');
+    logger.info({ userId: ws.userId, channel }, 'Subscribed to channel');
   }
 
   async handleUnsubscribe(ws, payload) {
@@ -184,7 +190,7 @@ class WebSocketHandler {
       data: { channel } 
     });
 
-    logger.debug({ userId: ws.userId, channel }, 'Unsubscribed from channel');
+    logger.info({ userId: ws.userId, channel }, 'Unsubscribed from channel');
   }
 
   async handleTyping(ws, payload) {
@@ -192,31 +198,38 @@ class WebSocketHandler {
 
     if (!roomId) return;
 
-    // Broadcast typing indicator to room
-    await eventEmitter.publish(`room:${roomId}:typing`, {
-      userId: ws.userId,
-      username: ws.userEmail.split('@')[0], // temporary, should get from DB
-      isTyping,
-      timestamp: Date.now(),
-    });
+    logger.debug({ userId: ws.userId, username: ws.username, roomId, isTyping }, 'Typing indicator');
+
+    const channel = `room:${roomId}`;
+    
+    this.broadcastToChannel(
+      channel,
+      {
+        type: 'typing',
+        data: {
+          userId: ws.userId,
+          username: ws.username,
+          isTyping,
+          timestamp: Date.now(),
+        },
+      },
+      ws.userId
+    );
   }
 
   async handleDisconnect(ws) {
     if (!ws.userId) return;
 
-    // Remove from clients map
     if (this.clients.has(ws.userId)) {
       this.clients.get(ws.userId).delete(ws);
       if (this.clients.get(ws.userId).size === 0) {
         this.clients.delete(ws.userId);
         
-        // User has no more connections - mark as offline
         await redis.srem('online_users', ws.userId);
         await this.publishUserStatus(ws.userId, 'offline');
       }
     }
 
-    // Clean up subscriptions
     if (this.subscriptions.has(ws.connectionId)) {
       this.subscriptions.delete(ws.connectionId);
     }
@@ -225,14 +238,13 @@ class WebSocketHandler {
   }
 
   async verifyChannelAccess(userId, channel) {
-    // Parse channel type and ID
     const [type, id] = channel.split(':');
 
     try {
+      const postgres = require('../shared/database/postgres');
+      
       switch (type) {
         case 'room':
-          // Check if user is member of the room
-          const postgres = require('../shared/database/postgres');
           const { rows } = await postgres.query(
             'SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2',
             [id, userId]
@@ -240,11 +252,9 @@ class WebSocketHandler {
           return rows.length > 0;
 
         case 'user':
-          // User can only subscribe to their own channel
           return id === userId;
 
         case 'task':
-          // Check if user is creator, assignee, or watcher
           const { rows: taskRows } = await postgres.query(
             `SELECT 1 FROM tasks 
              WHERE id = $1 AND (creator_id = $2 OR assignee_id = $2)
@@ -253,16 +263,6 @@ class WebSocketHandler {
             [id, userId]
           );
           return taskRows.length > 0;
-
-        case 'doc':
-          // Check if user is owner or collaborator
-          const { rows: docRows } = await postgres.query(
-            `SELECT 1 FROM documents WHERE id = $1 AND owner_id = $2
-             UNION
-             SELECT 1 FROM document_collaborators WHERE document_id = $1 AND user_id = $2`,
-            [id, userId]
-          );
-          return docRows.length > 0;
 
         default:
           return false;
@@ -274,37 +274,43 @@ class WebSocketHandler {
   }
 
   setupEventBroadcasting() {
-    // Listen to all events and broadcast to subscribed clients
-    eventEmitter.on('room:*', (data) => this.broadcastToChannel('room', data));
-    eventEmitter.on('user:*', (data) => this.broadcastToChannel('user', data));
-    eventEmitter.on('task:*', (data) => this.broadcastToChannel('task', data));
-    eventEmitter.on('doc:*', (data) => this.broadcastToChannel('doc', data));
+    eventEmitter.on('room:*', (data) => {
+      const channel = data._channel || 'room:unknown';
+      const excludeUserId = data._excludeUserId || null;
+      
+      logger.debug({ channel, type: data.type, excludeUserId }, 'Broadcasting room event');
+      
+      this.broadcastToChannel(channel, data, excludeUserId);
+    });
+
+    logger.info('Event broadcasting setup complete');
   }
 
-  async broadcastToChannel(type, data) {
-    // Broadcast to all clients subscribed to this channel
+  broadcastToChannel(channel, data, excludeUserId = null) {
+    let sentCount = 0;
+    
     for (const [connectionId, channels] of this.subscriptions.entries()) {
-      // Find matching channel
-      const matchingChannel = Array.from(channels).find(ch => {
-        const [chType, chId] = ch.split(':');
-        return chType === type;
-      });
-
-      if (matchingChannel) {
-        // Find the WebSocket for this connection
+      if (channels.has(channel)) {
         for (const userClients of this.clients.values()) {
           for (const ws of userClients) {
             if (ws.connectionId === connectionId && ws.readyState === WebSocket.OPEN) {
+              if (excludeUserId && ws.userId === excludeUserId) {
+                continue;
+              }
+              
               this.send(ws, {
                 type: 'event',
-                channel: matchingChannel,
+                channel,
                 data,
               });
+              sentCount++;
             }
           }
         }
       }
     }
+
+    logger.debug({ channel, sentCount, excludeUserId }, 'Event broadcasted');
   }
 
   async publishUserStatus(userId, status) {

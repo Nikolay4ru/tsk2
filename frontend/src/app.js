@@ -1,138 +1,164 @@
+import Router from './router.js';
+import WebSocketManager from './websocket.js';
 import API from './api.js';
-import { Router } from './router.js';
-import { WebSocketManager } from './websocket.js';
+import * as LoginModule from './modules/auth/login.js';
+import * as ChatListModule from './modules/chat/chat-list.js';
+import * as ChatWindowModule from './modules/chat/chat-window.js';
+import * as TaskBoardModule from './modules/task/task-board.js';
+import * as SettingsModule from './modules/settings/settings.js';
 
-window.app = {
-  user: null,
-  router: null,
-  ws: null,
-};
+class App {
+  constructor() {
+    this.user = null;
+    this.router = null;
+    this.ws = null;
+  }
 
-async function init() {
-  console.log('Initializing app...');
+  async init() {
+    console.log('🚀 Initializing app...');
 
-  const token = localStorage.getItem('accessToken');
-  
-  if (token) {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      window.app.user = {
-        id: payload.userId,
-        email: payload.email,
-      };
-      console.log('User authenticated:', window.app.user);
-    } catch (error) {
-      console.error('Token validation failed:', error);
-      localStorage.removeItem('accessToken');
-      window.app.user = null;
+    // Check authentication
+    const token = localStorage.getItem('accessToken');
+    
+    if (token) {
+      try {
+        // КРИТИЧНО: Установить токен в API перед запросом
+        API.setToken(token);
+        
+        const user = await API.getMe();
+        this.user = user;
+        console.log('✅ User authenticated:', this.user.username);
+        
+        // Initialize WebSocket
+        this.ws = new WebSocketManager();
+        await this.ws.connect();
+      } catch (error) {
+        console.error('❌ Auth check failed:', error);
+        localStorage.removeItem('accessToken');
+        this.user = null;
+      }
+    }
+
+    // Setup router with routes
+    const routes = [
+      {
+        path: '/',
+        module: this.user ? ChatListModule : LoginModule,
+      },
+      {
+        path: '/login',
+        module: LoginModule,
+      },
+      {
+        path: '/chat',
+        module: ChatListModule,
+      },
+      {
+        path: /^\/chat\/([a-f0-9-]+)$/,
+        module: ChatWindowModule,
+      },
+      {
+        path: '/tasks',
+        module: TaskBoardModule,
+      },
+      {
+        path: '/settings',
+        module: SettingsModule,
+      },
+      {
+        path: '/404',
+        module: {
+          init: () => {
+            const mainContent = document.getElementById('main-content');
+            if (mainContent) {
+              mainContent.innerHTML = `
+                <div class="empty-state">
+                  <h1>404</h1>
+                  <p>Page not found</p>
+                  <a href="/" class="btn btn-primary">Go Home</a>
+                </div>
+              `;
+            }
+          },
+        },
+      },
+    ];
+
+    this.router = new Router(routes);
+    await this.router.init();
+
+    // Setup navigation
+    this.setupNavigation();
+
+    console.log('✅ App initialized');
+  }
+
+  setupNavigation() {
+    // Navigation links
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('.nav-link, [data-link]');
+      if (link && link.hasAttribute('href')) {
+        e.preventDefault();
+        const path = link.getAttribute('href');
+        this.router.navigate(path);
+      }
+    });
+
+    // Logout button
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await this.logout();
+      });
     }
   }
 
-  const router = new Router();
-  window.app.router = router;
+  async login(credentials) {
+    try {
+      const data = await API.login(credentials.email, credentials.password);
+      
+      this.user = data.user;
+      // Токен уже установлен в API.login()
 
-  router.addRoute('/', async () => {
-    if (window.app.user) {
-      router.navigate('/chat');
-      return;
+      // Initialize WebSocket
+      this.ws = new WebSocketManager();
+      await this.ws.connect();
+
+      // Navigate to chat
+      this.router.navigate('/chat');
+
+      return data;
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    }
+  }
+
+  async logout() {
+    try {
+      await API.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+
+    this.user = null;
+    
+    if (this.ws) {
+      this.ws.disconnect();
+      this.ws = null;
     }
     
-    const { init: loginInit } = await import('./modules/auth/login.js');
-    await loginInit();
-  });
-
-  router.addRoute('/chat', async () => {
-    if (!window.app.user) {
-      router.navigate('/');
-      return;
-    }
-    const { init: chatInit } = await import('./modules/chat/chat-list.js');
-    await chatInit();
-  });
-
-  router.addRoute('/chat/:id', async (params) => {
-    if (!window.app.user) {
-      router.navigate('/');
-      return;
-    }
-    const { init: windowInit } = await import('./modules/chat/chat-window.js');
-    await windowInit(params.id);
-  });
-
-  router.addRoute('/tasks', async () => {
-    if (!window.app.user) {
-      router.navigate('/');
-      return;
-    }
-    const { init: tasksInit } = await import('./modules/task/task-list.js');
-    await tasksInit();
-  });
-
-  router.addRoute('/tasks/board', async () => {
-    if (!window.app.user) {
-      router.navigate('/');
-      return;
-    }
-    const { init: boardInit } = await import('./modules/task/task-board.js');
-    await boardInit();
-  });
-
-  router.addRoute('/tasks/:id', async (params) => {
-    if (!window.app.user) {
-      router.navigate('/');
-      return;
-    }
-    const { init: detailInit } = await import('./modules/task/task-detail.js');
-    await detailInit(params.id);
-  });
-
-  router.addRoute('/settings', async () => {
-    if (!window.app.user) {
-      router.navigate('/');
-      return;
-    }
-    const { init: settingsInit } = await import('./modules/settings/settings.js');
-    await settingsInit();
-  });
-
-  if (window.app.user) {
-    const ws = new WebSocketManager();
-    window.app.ws = ws;
-    await ws.connect();
-  }
-
-  router.start();
-
-  if ('serviceWorker' in navigator) {
-    try {
-      await navigator.serviceWorker.register('/service-worker.js');
-      console.log('Service Worker registered');
-    } catch (error) {
-      console.error('Service Worker registration failed:', error);
-    }
+    window.location.href = '/';
   }
 }
 
-window.app.logout = async function() {
-  try {
-    await API.logout();
-  } catch (error) {
-    console.error('Logout error:', error);
-  } finally {
-    localStorage.removeItem('accessToken');
-    window.app.user = null;
-    
-    if (window.app.ws) {
-      window.app.ws.disconnect();
-      window.app.ws = null;
-    }
-    
-    window.app.router.navigate('/');
-  }
-};
+// Initialize app
+const app = new App();
+window.app = app;
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
+document.addEventListener('DOMContentLoaded', () => {
+  app.init();
+});
+
+export default app;

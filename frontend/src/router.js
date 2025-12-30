@@ -1,63 +1,63 @@
 class Router {
-  constructor() {
-    this.routes = [];
-    this.currentRoute = null;
+  constructor(routes) {
+    this.routes = routes;
+    this.currentModule = null;
   }
 
-  addRoute(path, handler) {
-    const paramNames = [];
-    const pattern = path.replace(/:(\w+)/g, (_, name) => {
-      paramNames.push(name);
-      return '([^/]+)';
-    });
+  async init() {
+    window.addEventListener('popstate', () => this.handleRoute());
     
-    this.routes.push({
-      path,
-      pattern: new RegExp(`^${pattern}$`),
-      paramNames,
-      handler,
+    document.addEventListener('click', (e) => {
+      if (e.target.matches('[data-link]')) {
+        e.preventDefault();
+        this.navigate(e.target.getAttribute('href'));
+      }
     });
+
+    await this.handleRoute();
   }
 
   async navigate(path) {
-    if (this.currentRoute === path) return;
-
-    this.currentRoute = path;
-    window.history.pushState({}, '', path);
-    await this.handleRoute(path);
+    window.history.pushState(null, null, path);
+    await this.handleRoute();
   }
 
-  async handleRoute(path) {
-    for (const route of this.routes) {
-      const match = path.match(route.pattern);
-      
-      if (match) {
-        const params = {};
-        route.paramNames.forEach((name, index) => {
-          params[name] = match[index + 1];
-        });
-        
-        try {
-          await route.handler(params);
-        } catch (error) {
-          console.error('Route handler error:', error);
-        }
-        
-        return;
-      }
+  async handleRoute() {
+    const path = window.location.pathname;
+    
+    console.log('🔀 Routing to:', path);
+    
+    // Cleanup previous module
+    if (this.currentModule && this.currentModule.cleanup) {
+      console.log('🧹 Cleaning up previous module');
+      this.currentModule.cleanup();
     }
 
-    console.warn('No route found for:', path);
-  }
-
-  start() {
-    window.addEventListener('popstate', () => {
-      this.handleRoute(window.location.pathname);
+    let route = this.routes.find(r => {
+      if (r.path instanceof RegExp) {
+        return r.path.test(path);
+      }
+      return r.path === path;
     });
 
-    this.handleRoute(window.location.pathname);
+    if (!route) {
+      route = this.routes.find(r => r.path === '/404');
+    }
+
+    if (route) {
+      const match = route.path instanceof RegExp 
+        ? path.match(route.path) 
+        : null;
+      
+      const params = match ? match.slice(1) : [];
+      
+      this.currentModule = route.module;
+      
+      if (route.module && route.module.init) {
+        await route.module.init(...params);
+      }
+    }
   }
 }
 
-export { Router };
 export default Router;
