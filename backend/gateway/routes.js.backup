@@ -1,0 +1,77 @@
+const express = require('express');
+const authMiddleware = require('./middleware/auth.middleware');
+const logger = require('../shared/utils/logger');
+
+const router = express.Router();
+
+const SERVICES = {
+  auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
+  chat: process.env.CHAT_SERVICE_URL || 'http://localhost:3002',
+  task: process.env.TASK_SERVICE_URL || 'http://localhost:3003',
+};
+
+// Proxy helper - ИСПРАВЛЕНО: убираем префикс сервиса из пути
+async function proxyRequest(req, res, serviceUrl, servicePrefix) {
+  try {
+    // Убираем префикс из пути (например /auth из /auth/register)
+    let path = req.path;
+    if (servicePrefix && path.startsWith(servicePrefix)) {
+      path = path.substring(servicePrefix.length);
+    }
+    
+    const url = `${serviceUrl}${path}`;
+    const method = req.method;
+    
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(req.userId && { 'X-User-Id': req.userId }),
+      ...(req.userEmail && { 'X-User-Email': req.userEmail }),
+    };
+
+    const options = {
+      method,
+      headers,
+    };
+
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
+      options.body = JSON.stringify(req.body);
+    }
+
+    logger.debug({ url, method, originalPath: req.path }, 'Proxying request');
+
+    const response = await fetch(url, options);
+    const data = await response.json();
+
+    res.status(response.status).json(data);
+
+  } catch (error) {
+    logger.error({ service: serviceUrl, error: error.message }, 'Service proxy error');
+    res.status(503).json({ error: 'Service unavailable' });
+  }
+}
+
+// Auth routes (no auth middleware) - убираем префикс /auth
+router.post('/auth/register', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.post('/auth/login', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.post('/auth/refresh', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+
+// Protected routes
+router.use(authMiddleware);
+
+router.get('/auth/verify', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.post('/auth/logout', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+
+// Chat - убираем префикс /chat
+router.get('/chat/*', (req, res) => proxyRequest(req, res, SERVICES.chat, '/chat'));
+router.post('/chat/*', (req, res) => proxyRequest(req, res, SERVICES.chat, '/chat'));
+router.put('/chat/*', (req, res) => proxyRequest(req, res, SERVICES.chat, '/chat'));
+router.delete('/chat/*', (req, res) => proxyRequest(req, res, SERVICES.chat, '/chat'));
+
+// Task - убираем префикс /task
+router.get('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
+router.post('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
+router.put('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
+router.patch('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
+router.delete('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
+
+module.exports = router;
