@@ -2,6 +2,7 @@ import Router from './router.js';
 import WebSocketManager from './websocket.js';
 import API from './api.js';
 import * as LoginModule from './modules/auth/login.js';
+import * as RegisterModule from './modules/auth/register.js';
 import * as ChatListModule from './modules/chat/chat-list.js';
 import * as ChatWindowModule from './modules/chat/chat-window.js';
 import * as TaskBoardModule from './modules/task/task-board.js';
@@ -48,6 +49,10 @@ class App {
       {
         path: '/login',
         module: LoginModule,
+      },
+      {
+        path: '/register',
+        module: RegisterModule,
       },
       {
         path: '/chat',
@@ -100,7 +105,32 @@ class App {
       if (link && link.hasAttribute('href')) {
         e.preventDefault();
         const path = link.getAttribute('href');
+         // Mobile: Show chat list when Chats nav clicked
+        if (window.innerWidth <= 768 && link.dataset.nav === 'chat') {
+          const chatListContainer = document.getElementById('chat-list-container');
+          if (chatListContainer) {
+            chatListContainer.classList.add('mobile-active');
+          }
+        }
+        
+        // Update active nav
+        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        
         this.router.navigate(path);
+      }
+    });
+
+     // Mobile: Back button in chat list header
+    document.addEventListener('click', (e) => {
+      if (window.innerWidth <= 768) {
+        const chatListHeader = e.target.closest('.chat-list-header');
+        if (chatListHeader && e.target === chatListHeader.querySelector('::before')) {
+          const chatListContainer = document.getElementById('chat-list-container');
+          if (chatListContainer) {
+            chatListContainer.classList.remove('mobile-active');
+          }
+        }
       }
     });
 
@@ -131,6 +161,27 @@ class App {
       return data;
     } catch (error) {
       console.error('Login error:', error);
+      throw error;
+    }
+  }
+
+  async register(details) {
+    try {
+      const data = await API.register(details.email, details.password, details.username);
+      
+      this.user = data.user;
+      // Токен уже установлен в API.register()
+
+      // Initialize WebSocket
+      this.ws = new WebSocketManager();
+      await this.ws.connect();
+
+      // Navigate to chat
+      this.router.navigate('/chat');
+
+      return data;
+    } catch (error) {
+      console.error('Registration error:', error);
       throw error;
     }
   }

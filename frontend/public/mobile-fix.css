@@ -1,0 +1,212 @@
+/* ============================================
+   MOBILE FIX - APPEND TO styles.css
+   ============================================ */
+
+@media (max-width: 768px) {
+  /* RESET ALL */
+  #app {
+    position: relative !important;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Screen 1: Navigation Menu (visible by default) */
+  .sidebar {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--color-background-secondary);
+    z-index: 1;
+    display: flex !important;
+    flex-direction: column;
+    transform: translateX(0) !important;
+  }
+
+  .sidebar-menu {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-header {
+    height: 56px;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--color-divider);
+    flex-shrink: 0;
+  }
+
+  .sidebar-header h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    justify-content: flex-start;
+  }
+
+  .sidebar-nav .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    color: var(--color-text-primary);
+    font-size: 18px;
+    background: var(--color-background-tertiary);
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+
+  .sidebar-nav .nav-link svg {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .sidebar-nav .nav-link:active {
+    background: var(--color-background);
+  }
+
+  .sidebar-nav .nav-link.active {
+    background: var(--color-primary);
+    color: white;
+  }
+
+  /* Screen 2: Chat List (hidden by default, slides in from right) */
+  .sidebar-content,
+  #chat-list-container {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--color-background-secondary);
+    z-index: 2;
+    display: flex !important;
+    flex-direction: column;
+    transform: translateX(100%) !important;
+    transition: transform 0.3s ease !important;
+  }
+
+  .sidebar-content.mobile-active,
+  #chat-list-container.mobile-active {
+    transform: translateX(0) !important;
+  }
+
+  /* Chat List Header with Back Button */
+  .chat-list-header {
+    height: 56px;
+    padding: 0 16px 0 8px;
+    border-bottom: 1px solid var(--color-divider);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .chat-list-header .back-btn-mobile {
+    width: 44px;
+    height: 44px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: var(--color-primary);
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.2s;
+  }
+
+  .chat-list-header .back-btn-mobile:active {
+    background: var(--color-background-tertiary);
+  }
+
+  .chat-list-header h3 {
+    flex: 1;
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .chat-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Screen 3: Chat Window (hidden by default, slides in from right) */
+  .main-content {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--color-background);
+    z-index: 3;
+    display: flex !important;
+    flex-direction: column;
+    transform: translateX(100%) !important;
+    transition: transform 0.3s ease !important;
+  }
+
+  .main-content.mobile-chat-active {
+    transform: translateX(0) !important;
+  }
+
+  /* Show mobile-only elements */
+  .mobile-only {
+    display: flex !important;
+  }
+
+  /* Login/Register page - hide sidebar, show main-content */
+  body.login-page .sidebar,
+  body.register-page .sidebar {
+    display: none !important;
+  }
+
+  body.login-page .main-content,
+  body.register-page .main-content {
+    transform: translateX(0) !important;
+    z-index: 1;
+  }
+
+  /* Chat item adjustments */
+  .chat-item {
+    padding: 16px;
+  }
+
+  .chat-item-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .chat-item:has(.badge) .chat-item-content {
+    padding-right: 50px;
+  }
+
+  /* Messages container */
+  .messages-container {
+    padding: 16px 12px;
+  }
+
+  .message {
+    max-width: 85%;
+  }
+
+  .message-input-container {
+    padding: 12px;
+  }
+}

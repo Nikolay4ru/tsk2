@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const redis = require('../shared/database/redis');
 const eventEmitter = require('../shared/events/event-emitter');
 const logger = require('../shared/utils/logger');
+const userModel = require('../services/auth-service/models/user.model');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
 
@@ -82,6 +83,8 @@ class WebSocketHandler {
 
       await redis.sadd('online_users', ws.userId);
       await this.publishUserStatus(ws.userId, 'online');
+      await userModel.setOnline(ws.userId);
+      this.broadcastUserStatus(ws.userId, true);
 
       ws.on('pong', () => {
         ws.isAlive = true;
@@ -115,7 +118,7 @@ class WebSocketHandler {
       const message = JSON.parse(data);
       const { type, payload } = message;
 
-      logger.debug({ userId: ws.userId, type, payload }, 'WebSocket message received');
+      console.log('📨 WS Message:', { type, from: ws.userId });
 
       switch (type) {
         case 'subscribe':
@@ -130,6 +133,10 @@ class WebSocketHandler {
           await this.handleTyping(ws, payload);
           break;
 
+        case 'webrtc-signal':
+          this.handleWebRTCSignal(ws, message); // ✅ ИСПРАВЛЕНО: ws вместо client
+          break;
+
         case 'ping':
           this.send(ws, { type: 'pong', data: { timestamp: Date.now() } });
           break;
@@ -141,6 +148,98 @@ class WebSocketHandler {
     } catch (error) {
       logger.error({ userId: ws.userId, error: error.message }, 'Failed to handle message');
       this.send(ws, { type: 'error', data: { message: 'Invalid message format' } });
+    }
+  }
+
+  handleWebRTCSignal(ws, message) {
+    const { callId, roomId, signal, targetUserId, signalType } = message;
+
+    console.log('📞 WebRTC Signal:', { 
+      signalType, 
+      callId, 
+      from: ws.userId,  // ✅ ИСПРАВЛЕНО
+      to: targetUserId,
+      roomId,
+    });
+
+    if (!signal) {
+      console.error('❌ No signal data');
+      this.send(ws, {
+        type: 'error',
+        data: { message: 'Invalid WebRTC signal: missing signal data' },
+      });
+      return;
+    }
+
+    if (!callId) {
+      console.error('❌ No callId');
+      this.send(ws, {
+        type: 'error',
+        data: { message: 'Invalid WebRTC signal: missing callId' },
+      });
+      return;
+    }
+
+    // Для 1-1 звонков - отправить конкретному пользователю
+    if (targetUserId) {
+      console.log('🔍 Looking for target user:', targetUserId);
+      console.log('🔍 Online users:', Array.from(this.clients.keys()));
+      
+      // ✅ ИСПРАВЛЕНО: правильный поиск в Map<userId, Set<ws>>
+      const targetWsSet = this.clients.get(targetUserId);
+      
+      if (targetWsSet && targetWsSet.size > 0) {
+        // Отправить первому доступному WebSocket этого пользователя
+        const targetWs = Array.from(targetWsSet)[0];
+        
+        if (targetWs.readyState === WebSocket.OPEN) {
+          this.send(targetWs, {
+            type: 'webrtc-signal',
+            callId,
+            fromUserId: ws.userId,
+            signalType,
+            signal,
+          });
+          console.log('✅ Signal sent to target user:', targetUserId);
+        } else {
+          console.warn('⚠️ Target WebSocket not ready');
+        }
+      } else {
+        console.warn('⚠️ Target user not connected:', targetUserId);
+      }
+    } 
+    // Для конференций - broadcast в комнату
+    else if (roomId) {
+      let sent = 0;
+      const channel = `room:${roomId}`;
+      
+      for (const [connectionId, channels] of this.subscriptions.entries()) {
+        if (channels.has(channel)) {
+          for (const userWsSet of this.clients.values()) {
+            for (const userWs of userWsSet) {
+              if (userWs.connectionId === connectionId && 
+                  userWs.userId !== ws.userId &&
+                  userWs.readyState === WebSocket.OPEN) {
+                this.send(userWs, {
+                  type: 'webrtc-signal',
+                  callId,
+                  fromUserId: ws.userId,
+                  signalType,
+                  signal,
+                });
+                sent++;
+              }
+            }
+          }
+        }
+      }
+      console.log(`✅ Signal broadcast to ${sent} users in room:${roomId}`);
+    } else {
+      console.error('❌ No targetUserId or roomId');
+      this.send(ws, {
+        type: 'error',
+        data: { message: 'Invalid WebRTC signal: missing targetUserId or roomId' },
+      });
     }
   }
 
@@ -198,8 +297,6 @@ class WebSocketHandler {
 
     if (!roomId) return;
 
-    logger.debug({ userId: ws.userId, username: ws.username, roomId, isTyping }, 'Typing indicator');
-
     const channel = `room:${roomId}`;
     
     this.broadcastToChannel(
@@ -227,6 +324,8 @@ class WebSocketHandler {
         
         await redis.srem('online_users', ws.userId);
         await this.publishUserStatus(ws.userId, 'offline');
+        await userModel.setOffline(ws.userId);
+        this.broadcastUserStatus(ws.userId, false);
       }
     }
 
@@ -254,16 +353,6 @@ class WebSocketHandler {
         case 'user':
           return id === userId;
 
-        case 'task':
-          const { rows: taskRows } = await postgres.query(
-            `SELECT 1 FROM tasks 
-             WHERE id = $1 AND (creator_id = $2 OR assignee_id = $2)
-             UNION
-             SELECT 1 FROM task_watchers WHERE task_id = $1 AND user_id = $2`,
-            [id, userId]
-          );
-          return taskRows.length > 0;
-
         default:
           return false;
       }
@@ -278,8 +367,6 @@ class WebSocketHandler {
       const channel = data._channel || 'room:unknown';
       const excludeUserId = data._excludeUserId || null;
       
-      logger.debug({ channel, type: data.type, excludeUserId }, 'Broadcasting room event');
-      
       this.broadcastToChannel(channel, data, excludeUserId);
     });
 
@@ -291,8 +378,8 @@ class WebSocketHandler {
     
     for (const [connectionId, channels] of this.subscriptions.entries()) {
       if (channels.has(channel)) {
-        for (const userClients of this.clients.values()) {
-          for (const ws of userClients) {
+        for (const userWsSet of this.clients.values()) {
+          for (const ws of userWsSet) {
             if (ws.connectionId === connectionId && ws.readyState === WebSocket.OPEN) {
               if (excludeUserId && ws.userId === excludeUserId) {
                 continue;
@@ -311,6 +398,25 @@ class WebSocketHandler {
     }
 
     logger.debug({ channel, sentCount, excludeUserId }, 'Event broadcasted');
+  }
+
+  broadcastUserStatus(userId, isOnline) {
+    const statusEvent = {
+      type: 'user_status',
+      data: {
+        userId,
+        isOnline,
+        timestamp: Date.now(),
+      },
+    };
+
+    for (const userWsSet of this.clients.values()) {
+      for (const ws of userWsSet) {
+        if (ws.readyState === WebSocket.OPEN) {
+          this.send(ws, { type: 'event', channel: 'global', data: statusEvent });
+        }
+      }
+    }
   }
 
   async publishUserStatus(userId, status) {

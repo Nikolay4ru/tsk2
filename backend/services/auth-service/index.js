@@ -7,6 +7,12 @@ const redis = require('../../shared/database/redis');
 const { hashPassword, comparePassword, generateToken } = require('../../shared/utils/crypto');
 const { schemas, validate } = require('../../shared/validation/schemas');
 const authMiddleware = require('../../shared/middleware/auth.middleware');
+const { uploadAvatar } = require('../../shared/middleware/upload.middleware');
+const sharp = require('sharp');
+const fs = require('fs');
+const path = require('path');
+const eventEmitter = require('../../shared/events/event-emitter');
+const userModel = require('./models/user.model');
 const logger = require('../../shared/utils/logger');
 
 const app = express();
@@ -140,6 +146,9 @@ app.post('/login', async (req, res) => {
   }
 });
 
+
+
+
 // Refresh token
 app.post('/refresh', async (req, res) => {
   try {
@@ -268,6 +277,63 @@ app.put('/me', authMiddleware, async (req, res) => {
   }
 });
 
+
+// Upload avatar
+app.post('/upload-avatar', authMiddleware, uploadAvatar, async (req, res) => {
+  try {
+    console.log('📸 Avatar upload request received');
+    console.log('User ID:', req.userId);
+    console.log('File:', req.file);
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Resize and optimize image
+    const filename = `avatar-${req.userId}-${Date.now()}.jpg`;
+    const filepath = path.join('/var/www/chatapp/uploads/avatars', filename);
+
+    await sharp(req.file.path)
+      .resize(200, 200, { fit: 'cover' })
+      .jpeg({ quality: 90 })
+      .toFile(filepath);
+
+    // Delete original upload
+    fs.unlinkSync(req.file.path);
+
+    const avatarUrl = `/uploads/avatars/${filename}`;
+
+    // Update user
+    const user = await userModel.updateAvatar(req.userId, avatarUrl);
+
+    // Broadcast avatar update
+    await eventEmitter.publish('user:avatar_updated', {
+      userId: req.userId,
+      avatarUrl,
+    });
+
+    logger.info({ userId: req.userId, avatarUrl }, 'Avatar updated');
+
+    res.json({ 
+      message: 'Avatar updated successfully',
+      avatar_url: avatarUrl,
+      user,
+    });
+
+  } catch (error) {
+    logger.error({ error: error.message, stack: error.stack }, 'Upload avatar error');
+    
+    // Clean up file on error
+    if (req.file) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+    }
+    
+    res.status(500).json({ error: 'Failed to upload avatar', details: error.message });
+  }
+});
+
 // Search users (protected)
 app.get('/users/search', authMiddleware, async (req, res) => {
   try {
@@ -280,7 +346,13 @@ app.get('/users/search', authMiddleware, async (req, res) => {
     }
     
     const { rows } = await postgres.query(
-      `SELECT id, username, email, avatar_url, status
+      `SELECT 
+         id, 
+         username, 
+         email, 
+         avatar_url,
+         COALESCE(is_online, false) as is_online, 
+         last_seen
        FROM users
        WHERE (username ILIKE $1 OR email ILIKE $1)
        AND id != $2
@@ -298,6 +370,8 @@ app.get('/users/search', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
 
 // Logout
 app.post('/logout', async (req, res) => {

@@ -1,5 +1,7 @@
 import API from '../../api.js';
-import { formatTime, getInitials, escapeHtml } from '../../shared/utils/helpers.js';
+import { formatTime, getInitials, escapeHtml, formatLastSeen } from '../../shared/utils/helpers.js';
+import * as StartChatModal from './start-chat-modal.js';
+import * as AvatarUploadModal from '../profile/avatar-upload-modal.js';
 
 let rooms = [];
 let typingStatus = new Map();
@@ -7,33 +9,65 @@ let typingStatus = new Map();
 export async function init() {
   console.log('🟢 Initializing chat list');
 
-  const mainContent = document.getElementById('main-content');
+  const container = document.getElementById('chat-list-container');
   
-  // Clear mobile-chat-active class
-  mainContent.classList.remove('mobile-chat-active');
-  
-  mainContent.innerHTML = `
-    <div class="chat-list-container">
-      <header class="chat-list-header">
-        <h1>Chats</h1>
-        <button class="btn btn-primary" id="new-chat-btn">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14"/>
-          </svg>
-          New Chat
-        </button>
-      </header>
-      
-      <div class="chat-list" id="chat-list">
-        <div class="loading">Loading chats...</div>
-      </div>
+  container.innerHTML = `
+    <header class="chat-list-header">
+      <button class="back-btn-mobile" id="back-to-menu">←</button>
+      <div class="avatar avatar-current-user" id="current-user-avatar" title="Upload avatar"></div>
+      <h3>Chats</h3>
+      <button class="btn-icon" id="new-chat-btn" title="New Chat">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </button>
+    </header>
+    
+    <div class="chat-list" id="chat-list">
+      <div class="loading">Загрузка чатов...</div>
     </div>
   `;
 
+  updateCurrentUserAvatar();
   await loadRooms();
   setupEventListeners();
   subscribeToRooms();
   window.addEventListener('ws:event', handleWebSocketEvent);
+  window.addEventListener('avatar-updated', handleAvatarUpdated);
+
+  const mainContent = document.getElementById('main-content');
+  mainContent.classList.remove('mobile-chat-active');
+  mainContent.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">💬</div>
+      <h2>Выберите чат для начала переписки</h2>
+    </div>
+  `;
+}
+
+function updateCurrentUserAvatar() {
+  const avatarEl = document.getElementById('current-user-avatar');
+  if (!avatarEl) return;
+
+  const user = window.app.user;
+  if (user && user.avatar_url) {
+    avatarEl.innerHTML = `<img src="${user.avatar_url}" alt="${user.username}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+  } else {
+    avatarEl.textContent = getInitials(user?.username || '?');
+  }
+}
+
+function handleAvatarUpdated(event) {
+  const { avatarUrl } = event.detail;
+  
+  // Update current user avatar
+  if (window.app.user) {
+    window.app.user.avatar_url = avatarUrl;
+  }
+  updateCurrentUserAvatar();
+  
+  // Reload rooms to update avatars in list
+  loadRooms();
 }
 
 async function loadRooms() {
@@ -46,8 +80,8 @@ async function loadRooms() {
     const container = document.getElementById('chat-list');
     container.innerHTML = `
       <div class="empty-state">
-        <p class="text-danger">Failed to load chats</p>
-        <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+        <p class="text-danger">Не удалось загрузить чаты</p>
+        <button class="btn btn-primary" onclick="location.reload()">Повторить</button>
       </div>
     `;
   }
@@ -61,16 +95,17 @@ function renderRooms() {
       <div class="empty-state">
         <div class="empty-state-icon">💬</div>
         <p>No chats yet</p>
-        <button class="btn btn-primary" id="new-chat-empty">Start a conversation</button>
+        <button class="btn btn-primary" id="new-chat-empty">Начать разговор</button>
       </div>
     `;
-    document.getElementById('new-chat-empty')?.addEventListener('click', showNewChatModal);
+    document.getElementById('new-chat-empty')?.addEventListener('click', () => {
+      StartChatModal.show();
+    });
     return;
   }
 
   container.innerHTML = rooms.map(room => {
     const roomName = room.name || 'Chat';
-    const avatarText = getInitials(roomName);
     
     let lastMessageText = '';
     if (room.last_message) {
@@ -80,6 +115,13 @@ function renderRooms() {
         lastMessageText = room.last_message;
       }
     }
+
+
+    if (room.last_message && room.last_message.type === 'file') {
+      lastMessageText = `[File] ${room.last_message.file_name}`;
+    }
+
+  
     
     const isTyping = typingStatus.has(room.id);
     const typingUser = typingStatus.get(room.id);
@@ -88,9 +130,35 @@ function renderRooms() {
       ? `<span class="badge">${unreadCount > 99 ? '99+' : unreadCount}</span>` 
       : '';
 
+    console.log('unread Badge:', room.unread_count);
+    
+    // Online indicator для private чатов
+    const onlineIndicator = room.is_online 
+      ? '<span class="online-indicator"></span>' 
+      : '';
+
+    // Avatar
+    let avatarHtml = '';
+    if (room.avatar_url) {
+      avatarHtml = `
+        <div class="avatar">
+          <img src="${room.avatar_url}" alt="${roomName}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
+          ${onlineIndicator}
+        </div>
+      `;
+    } else {
+      const avatarText = getInitials(roomName);
+      avatarHtml = `
+        <div class="avatar">
+          ${avatarText}
+          ${onlineIndicator}
+        </div>
+      `;
+    }
+
     return `
       <div class="chat-item" data-room-id="${room.id}">
-        <div class="avatar">${avatarText}</div>
+        ${avatarHtml}
         <div class="chat-item-content">
           <div class="chat-item-header">
             <span class="chat-item-name">${escapeHtml(roomName)}</span>
@@ -98,8 +166,8 @@ function renderRooms() {
           </div>
           <div class="chat-item-message ${isTyping ? 'typing' : ''}">
             ${isTyping 
-              ? `<span class="typing-text">${escapeHtml(typingUser)} is typing...</span>`
-              : escapeHtml(lastMessageText || 'No messages yet')
+              ? `<span class="typing-text">${escapeHtml(typingUser)} печатает...</span>`
+              : escapeHtml(lastMessageText || 'Пока нет сообщений')
             }
           </div>
         </div>
@@ -111,6 +179,10 @@ function renderRooms() {
   document.querySelectorAll('.chat-item').forEach(item => {
     item.addEventListener('click', () => {
       const roomId = item.dataset.roomId;
+      
+      document.querySelectorAll('.chat-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      
       window.app.router.navigate(`/chat/${roomId}`);
     });
   });
@@ -119,62 +191,28 @@ function renderRooms() {
 function setupEventListeners() {
   const newChatBtn = document.getElementById('new-chat-btn');
   if (newChatBtn) {
-    newChatBtn.addEventListener('click', showNewChatModal);
+    newChatBtn.addEventListener('click', () => {
+      StartChatModal.show();
+    });
   }
-}
 
-function showNewChatModal() {
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.id = 'new-chat-modal';
-  modal.innerHTML = `
-    <div class="modal">
-      <div class="modal-header">
-        <h2>New Chat</h2>
-        <button class="btn-icon" id="close-modal">×</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Chat Name</label>
-          <input type="text" id="chat-name" class="input" placeholder="Enter chat name" />
-        </div>
-        <div class="form-group">
-          <label>Type</label>
-          <select id="chat-type" class="input">
-            <option value="group">Group</option>
-            <option value="private">Private</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" id="cancel-btn">Cancel</button>
-        <button class="btn btn-primary" id="create-btn">Create</button>
-      </div>
-    </div>
-  `;
+  const backBtn = document.getElementById('back-to-menu');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      console.log('📱 Back to menu clicked');
+      const chatListContainer = document.getElementById('chat-list-container');
+      if (chatListContainer) {
+        chatListContainer.classList.remove('mobile-active');
+      }
+    });
+  }
 
-  document.body.appendChild(modal);
-
-  document.getElementById('close-modal').addEventListener('click', () => modal.remove());
-  document.getElementById('cancel-btn').addEventListener('click', () => modal.remove());
-  document.getElementById('create-btn').addEventListener('click', async () => {
-    const name = document.getElementById('chat-name').value.trim();
-    const type = document.getElementById('chat-type').value;
-
-    if (!name) {
-      alert('Please enter a chat name');
-      return;
-    }
-
-    try {
-      const room = await API.createRoom({ name, type, encrypted: false });
-      modal.remove();
-      window.app.router.navigate(`/chat/${room.id}`);
-    } catch (error) {
-      console.error('Failed to create room:', error);
-      alert('Failed to create chat');
-    }
-  });
+  const avatarEl = document.getElementById('current-user-avatar');
+  if (avatarEl) {
+    avatarEl.addEventListener('click', () => {
+      AvatarUploadModal.show();
+    });
+  }
 }
 
 function subscribeToRooms() {
@@ -187,6 +225,12 @@ function subscribeToRooms() {
 
 function handleWebSocketEvent(event) {
   const { channel, data } = event.detail;
+  
+  if (channel === 'global' && data.type === 'user_status') {
+    handleUserStatusChange(data.data);
+    return;
+  }
+  
   const match = channel.match(/^room:(.+)$/);
   if (!match) return;
   
@@ -205,6 +249,23 @@ function handleWebSocketEvent(event) {
   }
 }
 
+function handleUserStatusChange({ userId, isOnline }) {
+  let updated = false;
+  rooms.forEach(room => {
+    if (room.type === 'private' && room.other_members) {
+      const otherUser = room.other_members.find(u => u.id === userId);
+      if (otherUser) {
+        room.is_online = isOnline;
+        updated = true;
+      }
+    }
+  });
+  
+  if (updated) {
+    renderRooms();
+  }
+}
+
 function handleNewMessage(roomId, message) {
   const room = rooms.find(r => r.id === roomId);
   if (!room) return;
@@ -213,6 +274,7 @@ function handleNewMessage(roomId, message) {
   room.updated_at = message.created_at;
   
   if (message.user_id !== window.app.user.id) {
+    console.log('Incrementing unread count for room', room);
     room.unread_count = (room.unread_count || 0) + 1;
   }
   
@@ -252,5 +314,6 @@ export function cleanup() {
     });
   }
   window.removeEventListener('ws:event', handleWebSocketEvent);
+  window.removeEventListener('avatar-updated', handleAvatarUpdated);
   typingStatus.clear();
 }

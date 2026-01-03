@@ -1,133 +1,173 @@
-// backend/gateway/server.js
-// ============================================
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config({ path: '/var/www/chatapp/backend/.env' });
 const express = require('express');
-const http = require('http');
-const helmet = require('helmet');
 const cors = require('cors');
-const WebSocketHandler = require('./websocket-handler');
-const routes = require('./routes');
-const rateLimiter = require('./middleware/rate-limiter');
-const errorHandler = require('./middleware/error-handler');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const morgan = require('morgan');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const logger = require('../shared/utils/logger');
+const authMiddleware = require('../shared/middleware/auth.middleware');
 
 const app = express();
-const server = http.createServer(app);
 
-// Security middleware
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "ws:", "wss:"],
-    },
-  },
+  contentSecurityPolicy: false,
 }));
 
-// CORS
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: process.env.CORS_ORIGIN || '*',
   credentials: true,
 }));
 
-// Body parser
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Request logging
-app.use((req, res, next) => {
-  const start = Date.now();
-  
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    logger.info({
-      method: req.method,
-      url: req.url,
-      status: res.statusCode,
-      duration,
-      userId: req.userId,
-    }, 'Request completed');
-  });
-  
-  next();
-});
-
-// Rate limiting
-app.use('/api/', rateLimiter);
-
-// API routes
-app.use('/api', routes);
+app.use(morgan('combined', {
+  stream: {
+    write: (message) => logger.info(message.trim()),
+  },
+}));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'gateway',
-    timestamp: Date.now(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-  });
+  res.json({ status: 'ok', service: 'gateway' });
+});
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  message: 'Too many requests from this IP',
+});
+
+app.use('/auth/login', limiter);
+app.use('/auth/register', limiter);
+app.use('/api/auth/login', limiter);
+app.use('/api/auth/register', limiter);
+
+console.log('=================================');
+console.log('🚀 Setting up Gateway routes...');
+console.log('=================================');
+
+// ============================================
+// FILE UPLOAD ROUTES - С /api ПРЕФИКСОМ
+// ============================================
+
+const avatarProxyConfig = {
+  target: 'http://localhost:3001',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/api/auth': '',
+    '^/auth': '',
+  },
+  onProxyReq: (proxyReq, req, res) => {
+    if (req.userId) {
+      proxyReq.setHeader('X-User-Id', req.userId);
+    }
+    console.log('📤 PROXYING Avatar TO:', 'http://localhost:3001' + proxyReq.path);
+    logger.info({ userId: req.userId }, 'Proxying avatar upload');
+  },
+  onProxyRes: (proxyRes, req, res) => {
+    console.log('📥 Avatar proxy response:', proxyRes.statusCode);
+  },
+  onError: (err, req, res) => {
+    console.error('❌ Avatar PROXY ERROR:', err.message);
+    logger.error({ error: err.message }, 'Avatar upload proxy error');
+  },
+};
+
+// Avatar upload - С /api префиксом
+app.post('/api/auth/upload-avatar', 
+  (req, res, next) => {
+    console.log('🔵 [/api/auth/upload-avatar] Route HIT!');
+    next();
+  },
+  authMiddleware,
+  (req, res, next) => {
+    console.log('✅ Auth passed, user:', req.userId);
+    next();
+  },
+  createProxyMiddleware(avatarProxyConfig)
+);
+
+console.log('✅ POST /api/auth/upload-avatar configured');
+
+// Avatar upload - БЕЗ /api префикса (на всякий случай)
+app.post('/auth/upload-avatar', 
+  authMiddleware,
+  createProxyMiddleware(avatarProxyConfig)
+);
+
+console.log('✅ POST /auth/upload-avatar configured');
+
+// File upload для чатов
+const fileProxyConfig = {
+  target: 'http://localhost:3002',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/api/chat': '',
+    '^/chat': '',
+  },
+  onProxyReq: (proxyReq, req, res) => {
+    if (req.userId) {
+      proxyReq.setHeader('X-User-Id', req.userId);
+    }
+    logger.info({ userId: req.userId }, 'Proxying file upload');
+  },
+};
+
+app.post('/api/chat/files/upload', authMiddleware, createProxyMiddleware(fileProxyConfig));
+app.post('/chat/files/upload', authMiddleware, createProxyMiddleware(fileProxyConfig));
+
+console.log('✅ POST /api/chat/files/upload configured');
+console.log('✅ POST /chat/files/upload configured');
+
+// ============================================
+// REGULAR ROUTES - JSON parsing
+// ============================================
+
+app.use(express.json({ limit: '10mb' }));
+
+const routes = require('./routes');
+app.use('/', routes);
+
+// 404 handler
+app.use((req, res, next) => {
+  console.log('❌ 404 NOT FOUND:', req.method, req.path);
+  logger.warn({ path: req.path, method: req.method }, 'Route not found');
+  res.status(404).json({ error: 'Not found', path: req.path });
+});
+
+// Error handling
+app.use((err, req, res, next) => {
+  console.error('❌ UNHANDLED ERROR:', err);
+  logger.error({ error: err.message, stack: err.stack }, 'Unhandled error');
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+const PORT = process.env.GATEWAY_PORT || 3000;
+
+const server = app.listen(PORT, () => {
+  console.log('=================================');
+  console.log('🚀 Gateway running on port', PORT);
+  console.log('=================================');
+  console.log('File upload routes:');
+  console.log('  POST /api/auth/upload-avatar → Auth Service');
+  console.log('  POST /auth/upload-avatar → Auth Service');
+  console.log('  POST /api/chat/files/upload → Chat Service');
+  console.log('  POST /chat/files/upload → Chat Service');
+  console.log('=================================');
+  logger.info(`Gateway running on port ${PORT}`);
 });
 
 // WebSocket
-const wsHandler = new WebSocketHandler(server);
-
-// Make wsHandler available globally for broadcasting
-global.wsHandler = wsHandler;
-
-// Error handler (must be last)
-app.use(errorHandler);
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
-
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, () => {
-  logger.info(`Gateway server running on port ${PORT}`);
-  logger.info(`WebSocket available at ws://localhost:${PORT}/ws`);
-  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+const WebSocketHandler = require('./websocket-handler');
+new WebSocketHandler(server);
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, shutting down gracefully...');
-  
-  // Close WebSocket server
-  wsHandler.close();
-  
-  // Close HTTP server
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully');
   server.close(() => {
-    logger.info('HTTP server closed');
+    logger.info('Server closed');
+    process.exit(0);
   });
-  
-  // Close database connections
-  const postgres = require('../shared/database/postgres');
-  const redis = require('../shared/database/redis');
-  
-  await postgres.close();
-  await redis.close();
-  
-  logger.info('All connections closed');
-  process.exit(0);
 });
 
-process.on('SIGINT', () => {
-  process.emit('SIGTERM');
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  logger.fatal({ error: error.message, stack: error.stack }, 'Uncaught exception');
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error({ reason, promise }, 'Unhandled promise rejection');
-});
+module.exports = server;

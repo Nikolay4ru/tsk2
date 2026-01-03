@@ -2,13 +2,13 @@ const postgres = require('../../../shared/database/postgres');
 const logger = require('../../../shared/utils/logger');
 
 exports.create = async (data) => {
-  const { roomId, taskId, userId, content, type, fileUrl, replyTo } = data;
+  const { roomId, taskId, userId, content, type, fileId, fileUrl, fileName, fileType, replyTo } = data;
   
   const { rows } = await postgres.query(
-    `INSERT INTO messages (room_id, task_id, user_id, content, type, file_url, reply_to, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+    `INSERT INTO messages (room_id, task_id, user_id, content, type, file_id, file_url, file_name, file_type, reply_to, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
      RETURNING *`,
-    [roomId, taskId, userId, content, type, fileUrl, replyTo]
+    [roomId, taskId, userId, content, type, fileId, fileUrl, fileName, fileType, replyTo]
   );
   
   // Get username
@@ -27,7 +27,7 @@ exports.findByRoomId = async (roomId, options = {}) => {
   const { before, after, limit = 50 } = options;
   
   let query = `
-    SELECT m.*, u.username
+    SELECT m.*, u.username, u.avatar_url
     FROM messages m
     LEFT JOIN users u ON m.user_id = u.id
     WHERE m.room_id = $1

@@ -15,7 +15,7 @@ export async function init() {
     <div class="login-container">
       <div class="login-box">
         <h1>ChatApp</h1>
-        <p class="login-subtitle">Sign in to continue</p>
+        <p class="login-subtitle">Войдите в свой аккаунт</p>
         
         <form id="login-form" class="login-form">
           <div class="form-group">
@@ -47,12 +47,12 @@ export async function init() {
           <div id="error-message" class="error-message" style="display: none;"></div>
           
           <button type="submit" class="btn btn-primary btn-block" id="login-btn">
-            Sign In
+            Войти
           </button>
         </form>
         
         <p class="login-footer">
-          Don't have an account? <a href="/register" data-link>Register</a>
+          Еще нет аккаунта? <a href="/register" data-link>Создать аккаунт</a>
         </p>
       </div>
     </div>

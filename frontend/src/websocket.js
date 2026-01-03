@@ -1,3 +1,4 @@
+/* WEBRTC FIX v3 - 2026-01-03 */
 class WebSocketManager {
   constructor() {
     this.ws = null;
@@ -25,7 +26,7 @@ class WebSocketManager {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('✅ WebSocket connected [WEBRTC-FIX-v3]');
         this.reconnectAttempts = 0;
         this.startPing();
         resolve();
@@ -54,25 +55,27 @@ class WebSocketManager {
   }
 
   handleMessage(data) {
-    console.log('WebSocket message:', data.type, data);
+    console.log('📩 [v3] WebSocket message:', data.type);
 
     switch (data.type) {
       case 'connected':
         this.connectionId = data.data.connectionId;
         console.log('Connection ID:', this.connectionId);
         
-        // Re-subscribe to all channels
         this.subscriptions.forEach(channel => {
           this.subscribe(channel);
         });
         break;
 
       case 'subscribed':
-        console.log('Subscribed to:', data.data.channel);
+        console.log('✅ Subscribed:', data.data.channel);
+        break;
+        
+      case 'unsubscribed':
+        console.log('✅ Unsubscribed:', data.data.channel);
         break;
 
       case 'event':
-        // Dispatch custom event for components
         const event = new CustomEvent('ws:event', { 
           detail: {
             channel: data.channel,
@@ -82,16 +85,29 @@ class WebSocketManager {
         window.dispatchEvent(event);
         break;
 
+      case 'webrtc-signal':
+        console.log('📞 [v3] WEBRTC SIGNAL HANDLER TRIGGERED!');
+        const webrtcEvent = new CustomEvent('ws:event', {
+          detail: {
+            channel: 'webrtc',
+            data: {
+              type: 'webrtc-signal',
+              data: data,
+            },
+          },
+        });
+        window.dispatchEvent(webrtcEvent);
+        break;
+
       case 'pong':
-        // Heartbeat response
         break;
 
       case 'error':
-        console.error('WebSocket error:', data.data);
+        console.error('❌ WebSocket error:', data.data);
         break;
 
       default:
-        console.warn('Unknown message type:', data.type);
+        console.warn('⚠️ [v3] Unknown message type:', data.type);
     }
   }
 
@@ -104,7 +120,7 @@ class WebSocketManager {
   }
 
   subscribe(channel) {
-    console.log('Subscribing to:', channel);
+    console.log('📡 Subscribing to:', channel);
     this.subscriptions.add(channel);
     
     this.send({
@@ -114,7 +130,7 @@ class WebSocketManager {
   }
 
   unsubscribe(channel) {
-    console.log('Unsubscribing from:', channel);
+    console.log('📡 Unsubscribing from:', channel);
     this.subscriptions.delete(channel);
     
     this.send({

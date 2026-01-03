@@ -6,13 +6,20 @@ class WebSocketManager {
     this.reconnectDelay = 1000;
     this.pingInterval = null;
     this.subscriptions = new Set();
+    this.connectionId = null;
   }
 
   async connect() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      console.error('No access token available');
+      return Promise.reject(new Error('No access token'));
+    }
 
-    console.log('Connecting to WebSocket:', wsUrl);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
+
+    console.log('Connecting to WebSocket:', wsUrl.replace(token, '***'));
 
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(wsUrl);
@@ -21,12 +28,6 @@ class WebSocketManager {
         console.log('WebSocket connected');
         this.reconnectAttempts = 0;
         this.startPing();
-        
-        // Re-subscribe to all channels
-        this.subscriptions.forEach(channel => {
-          this.send({ type: 'subscribe', channel });
-        });
-        
         resolve();
       };
 
@@ -53,8 +54,64 @@ class WebSocketManager {
   }
 
   handleMessage(data) {
-    const event = new CustomEvent('ws:event', { detail: data });
-    window.dispatchEvent(event);
+    console.log('WebSocket message:', data.type, data);
+
+    switch (data.type) {
+      case 'connected':
+        this.connectionId = data.data.connectionId;
+        console.log('Connection ID:', this.connectionId);
+        
+        // Re-subscribe to all channels
+        this.subscriptions.forEach(channel => {
+          this.subscribe(channel);
+        });
+        break;
+
+      case 'subscribed':
+        console.log('Subscribed to:', data.data.channel);
+        break;
+        
+      case 'unsubscribed':
+        console.log('Unsubscribed from:', data.data.channel);
+        break;
+
+      case 'event':
+        // Dispatch custom event for components
+        const event = new CustomEvent('ws:event', { 
+          detail: {
+            channel: data.channel,
+            data: data.data,
+          }
+        });
+        window.dispatchEvent(event);
+        break;
+
+      case 'webrtc-signal':
+        // ✅ ДОБАВЛЕНА ОБРАБОТКА WebRTC СИГНАЛОВ
+        console.log('📞 WebRTC signal received, dispatching event');
+        const webrtcEvent = new CustomEvent('ws:event', {
+          detail: {
+            channel: 'webrtc',
+            data: {
+              type: 'webrtc-signal',
+              data: data, // Весь объект: callId, fromUserId, signal
+            },
+          },
+        });
+        window.dispatchEvent(webrtcEvent);
+        break;
+
+      case 'pong':
+        // Heartbeat response
+        break;
+
+      case 'error':
+        console.error('WebSocket error:', data.data);
+        break;
+
+      default:
+        console.warn('Unknown message type:', data.type);
+    }
   }
 
   send(data) {
@@ -68,20 +125,30 @@ class WebSocketManager {
   subscribe(channel) {
     console.log('Subscribing to:', channel);
     this.subscriptions.add(channel);
-    this.send({ type: 'subscribe', channel });
+    
+    this.send({
+      type: 'subscribe',
+      payload: { channel },
+    });
   }
 
   unsubscribe(channel) {
     console.log('Unsubscribing from:', channel);
     this.subscriptions.delete(channel);
-    this.send({ type: 'unsubscribe', channel });
+    
+    this.send({
+      type: 'unsubscribe',
+      payload: { channel },
+    });
   }
 
   sendTyping(roomId, isTyping) {
     this.send({
       type: 'typing',
-      roomId,
-      isTyping,
+      payload: {
+        roomId,
+        isTyping,
+      },
     });
   }
 
@@ -112,7 +179,7 @@ class WebSocketManager {
   startPing() {
     this.pingInterval = setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'ping' }));
+        this.send({ type: 'ping' });
       }
     }, 30000);
   }

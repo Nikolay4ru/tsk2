@@ -14,25 +14,24 @@ async function proxyRequest(req, res, serviceUrl, servicePrefix) {
   try {
     let path = req.path;
     
-    // Убираем префикс
+    // Убираем /api префикс если есть
+    if (path.startsWith('/api/')) {
+      path = path.substring(4); // убрать '/api'
+    }
+    
+    // Убираем service prefix
     if (servicePrefix && path.startsWith(servicePrefix)) {
       path = path.substring(servicePrefix.length);
     }
     
-    // Добавляем query string
     const queryString = new URLSearchParams(req.query).toString();
     const url = `${serviceUrl}${path}${queryString ? '?' + queryString : ''}`;
     
-    console.log('========================================');
-    console.log('PROXY REQUEST DEBUG:');
-    console.log('Original Path:', req.path);
-    console.log('Service Prefix:', servicePrefix);
-    console.log('Final Path:', path);
-    console.log('Query:', req.query);
-    console.log('Final URL:', url);
-    console.log('Method:', req.method);
-    console.log('Body:', req.body);
-    console.log('========================================');
+    logger.debug({ 
+      originalPath: req.path, 
+      finalPath: path, 
+      url 
+    }, 'Proxying request');
     
     const headers = {
       'Content-Type': 'application/json',
@@ -50,51 +49,59 @@ async function proxyRequest(req, res, serviceUrl, servicePrefix) {
     }
 
     const response = await fetch(url, options);
-    
-    console.log('Response Status:', response.status);
-    
     const contentType = response.headers.get('content-type');
     
     if (contentType && contentType.includes('application/json')) {
       const data = await response.json();
-      console.log('Response Data:', data);
       res.status(response.status).json(data);
     } else {
       const text = await response.text();
-      console.log('Response Text (first 200 chars):', text.substring(0, 200));
       res.status(502).json({ error: 'Invalid response from service', details: text.substring(0, 200) });
     }
 
   } catch (error) {
-    console.error('PROXY ERROR:', error);
-    logger.error({ service: serviceUrl, error: error.message, stack: error.stack }, 'Service proxy error');
+    logger.error({ service: serviceUrl, error: error.message }, 'Service proxy error');
     res.status(503).json({ error: 'Service unavailable', message: error.message });
   }
 }
 
 // ============================================
-// PUBLIC AUTH ROUTES (no middleware)
+// PUBLIC AUTH ROUTES
 // ============================================
 router.post('/auth/register', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.post('/auth/login', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.post('/auth/refresh', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 
+// С /api префиксом
+router.post('/api/auth/register', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.post('/api/auth/login', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.post('/api/auth/refresh', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+
 // ============================================
-// PROTECTED ROUTES (require auth)
+// PROTECTED ROUTES
 // ============================================
 router.use(authMiddleware);
 
-// Auth protected routes
+// Auth protected - без /api
 router.get('/auth/verify', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.get('/auth/me', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.put('/auth/me', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.post('/auth/logout', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 router.get('/auth/users/search', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
 
+// Auth protected - с /api
+router.get('/api/auth/verify', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.get('/api/auth/me', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.put('/api/auth/me', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.post('/api/auth/logout', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+router.get('/api/auth/users/search', (req, res) => proxyRequest(req, res, SERVICES.auth, '/auth'));
+
 // Chat routes
 router.all('/chat/*', (req, res) => proxyRequest(req, res, SERVICES.chat, '/chat'));
+router.all('/api/chat/*', (req, res) => proxyRequest(req, res, SERVICES.chat, '/chat'));
 
 // Task routes
 router.all('/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
+router.all('/api/task/*', (req, res) => proxyRequest(req, res, SERVICES.task, '/task'));
 
 module.exports = router;

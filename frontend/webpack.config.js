@@ -33,7 +33,13 @@ module.exports = {
     }),
     new CopyWebpackPlugin({
       patterns: [
-        { from: 'public/styles.css', to: 'styles.css' },
+        { 
+          from: 'public/styles.css', 
+          to: 'styles.[contenthash].css', // Добавить hash к CSS
+          transform(content) {
+            return content;
+          },
+        },
         { from: 'public/manifest.json', to: 'manifest.json', noErrorOnMissing: true },
         { from: 'public/icon-192.png', to: 'icon-192.png', noErrorOnMissing: true },
         { from: 'public/icon-512.png', to: 'icon-512.png', noErrorOnMissing: true },

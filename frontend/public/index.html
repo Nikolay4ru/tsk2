@@ -4,56 +4,64 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0e1621">
+
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>ChatApp</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div id="app">
-    <!-- Sidebar - Chat List -->
+    <!-- Sidebar: Navigation + Chat List -->
     <aside id="sidebar" class="sidebar">
-      <div class="sidebar-header">
-        <h2>ChatApp</h2>
+      <!-- Navigation Menu (top) -->
+      <div class="sidebar-menu">
+        <div class="sidebar-header">
+          <h2>ChatApp</h2>
+          <button id="logout-btn" class="btn-icon" title="Logout">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            </svg>
+          </button>
+        </div>
+        
+        <nav class="sidebar-nav">
+          <a href="/chat" class="nav-link active" data-link data-nav="chat">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span>Chats</span>
+          </a>
+          
+          <a href="/tasks" class="nav-link" data-link data-nav="tasks">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"/>
+              <rect x="14" y="3" width="7" height="7"/>
+              <rect x="3" y="14" width="7" height="7"/>
+              <rect x="14" y="14" width="7" height="7"/>
+            </svg>
+            <span>Tasks</span>
+          </a>
+          
+          <a href="/settings" class="nav-link" data-link data-nav="settings">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+            </svg>
+            <span>Settings</span>
+          </a>
+        </nav>
       </div>
-      
-      <nav class="sidebar-nav">
-        <a href="/chat" class="nav-link" data-link>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          <span>Chats</span>
-        </a>
-        
-        <a href="/tasks" class="nav-link" data-link>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="7" height="7"/>
-            <rect x="14" y="3" width="7" height="7"/>
-            <rect x="3" y="14" width="7" height="7"/>
-            <rect x="14" y="14" width="7" height="7"/>
-          </svg>
-          <span>Tasks</span>
-        </a>
-        
-        <a href="/settings" class="nav-link" data-link>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
-          </svg>
-          <span>Settings</span>
-        </a>
-      </nav>
-      
-      <div class="sidebar-footer">
-        <button id="logout-btn" class="btn btn-secondary">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
-          </svg>
-          Logout
-        </button>
+
+      <!-- Chat List (bottom, takes remaining space) -->
+      <div id="chat-list-container" class="sidebar-content">
+        <div class="loading">Loading...</div>
       </div>
     </aside>
 
-    <!-- Main Content Area -->
+    <!-- Main Content: Chat Window / Task Board / Settings -->
     <main id="main-content" class="main-content">
       <div class="loading-screen">
         <div class="spinner"></div>

@@ -85,7 +85,7 @@ function setupListeners() {
 async function searchUsers(query) {
   const resultsContainer = document.getElementById('user-results');
   
-  resultsContainer.innerHTML = '<div class="loading">Searching...</div>';
+  resultsContainer.innerHTML = '<div class="loading">Поис...</div>';
   
   try {
     const users = await API.searchUsers(query);
@@ -93,7 +93,7 @@ async function searchUsers(query) {
     if (users.length === 0) {
       resultsContainer.innerHTML = `
         <div class="empty-state">
-          <p>No users found</p>
+          <p>Пользователи не найдены</p>
         </div>
       `;
       return;
@@ -126,7 +126,7 @@ window.addMemberToRoom = async function(userId) {
   try {
     await API.addRoomMember(currentRoomId, userId);
     
-    alert('Member added successfully!');
+    alert('Пользователь добавлен!');
     close();
     
     // Reload room info

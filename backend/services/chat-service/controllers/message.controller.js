@@ -30,7 +30,7 @@ exports.getMessages = async (req, res) => {
 
 exports.sendMessage = async (req, res) => {
   try {
-    const { roomId, taskId, content, type, fileUrl, replyTo } = req.body;
+    const { roomId, taskId, content, type, fileId, fileUrl, fileName, fileType, replyTo } = req.body;
     
     logger.info({ 
       roomId, 
@@ -43,8 +43,8 @@ exports.sendMessage = async (req, res) => {
       return res.status(400).json({ error: 'roomId or taskId required' });
     }
     
-    if (!content || content.trim().length === 0) {
-      return res.status(400).json({ error: 'Message content required' });
+    if (!content && !fileUrl) {
+      return res.status(400).json({ error: 'Content or file is required' });
     }
     
     if (roomId) {
@@ -60,7 +60,10 @@ exports.sendMessage = async (req, res) => {
       userId: req.userId,
       content: content.trim(),
       type: type || 'text',
-      fileUrl,
+      fileId: fileId || null,
+      fileUrl: fileUrl || null,
+      fileName: fileName || null,
+      fileType: fileType || null,
       replyTo,
     });
     
@@ -69,10 +72,23 @@ exports.sendMessage = async (req, res) => {
       
       logger.info({ roomId, messageId: message.id, senderId: req.userId }, 'Broadcasting new message');
       
+
+      const postgres = require('../../../shared/database/postgres');
+    const { rows } = await postgres.query(
+      'SELECT username, avatar_url FROM users WHERE id = $1',
+      [req.userId]
+    );
+
+    const fullMessage = {
+      ...message,
+      username: rows[0]?.username,
+      avatar_url: rows[0]?.avatar_url,
+    };
+
       // КРИТИЧНО: Добавить excludeUserId чтобы не отправлять отправителю
       await eventEmitter.publish(`room:${roomId}`, {
         type: 'new_message',
-        data: message,
+        data: fullMessage,
         _channel: `room:${roomId}`,
         _excludeUserId: req.userId, // НЕ отправлять отправителю
       });
