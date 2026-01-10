@@ -189,5 +189,14 @@ class WebSocketManager {
   }
 }
 
+/* 🔥 ЕДИНСТВЕННЫЙ ИНСТАНС */
+const wsManager = new WebSocketManager();
+
+/* 🔥 ГЛОБАЛЬНО */
+window.wsManager = wsManager;
+
+/* 🔥 ВАЖНО: default = ИНСТАНС */
+export default wsManager;
+
+/* 🔥 optional: если вдруг понадобится класс */
 export { WebSocketManager };
-export default WebSocketManager;

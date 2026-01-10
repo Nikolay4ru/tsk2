@@ -1,4 +1,3 @@
-// backend/gateway/server.js
 require('dotenv').config({ path: '/var/www/chatapp/backend/.env' });
 const express = require('express');
 const cors = require('cors');
@@ -74,6 +73,7 @@ const avatarProxyConfig = {
   },
 };
 
+// Avatar upload - С /api префиксом
 app.post('/api/auth/upload-avatar', 
   (req, res, next) => {
     console.log('🔵 [/api/auth/upload-avatar] Route HIT!');
@@ -89,6 +89,7 @@ app.post('/api/auth/upload-avatar',
 
 console.log('✅ POST /api/auth/upload-avatar configured');
 
+// Avatar upload - БЕЗ /api префикса (на всякий случай)
 app.post('/auth/upload-avatar', 
   authMiddleware,
   createProxyMiddleware(avatarProxyConfig)
@@ -122,7 +123,8 @@ console.log('✅ POST /chat/files/upload configured');
 // REGULAR ROUTES - JSON parsing
 // ============================================
 
-// app.use(express.json({ limit: '10mb' })); // MOVED AFTER MEDIA PROXY
+app.use(express.json({ limit: '10mb' }));
+
 
 // ============================================
 // MEDIA SERVICE PROXY - MediaSoup SFU
@@ -151,62 +153,11 @@ const mediaProxyConfig = {
   },
 };
 
-// ✅ OPTIONS preflight БЕЗ auth (для CORS)
-app.options('/api/media/*', (req, res) => {
-  console.log('✅ OPTIONS /api/media/* - allowing preflight');
-  res.sendStatus(200);
-});
-
-// ✅ Все остальные методы С auth
 app.use('/api/media', authMiddleware, createProxyMiddleware(mediaProxyConfig));
 
-
-
-console.log('✅ OPTIONS /api/media/* → CORS preflight allowed');
 console.log('✅ /api/media/* → Media Service (port 3004)');
 
-// ✅ JSON parsing ПОСЛЕ media proxy (чтобы не читать stream для media routes)
-const livekitProxyConfig = {
-  target: 'http://localhost:3005',
-  changeOrigin: true,
-  timeout: 60000, // ✅ ДОБАВЛЕНО: 60 секунд timeout
-  pathRewrite: {
-    '^/api/livekit': '',
-  },
-  onProxyReq: (proxyReq, req, res) => {
-    if (req.userId) {
-      proxyReq.setHeader('X-User-Id', req.userId);
-    }
-    
-    // ✅ ИСПРАВЛЕНО: Re-serialize body для proxy
-    if (req.body && Object.keys(req.body).length > 0) {
-      const bodyData = JSON.stringify(req.body);
-      proxyReq.setHeader('Content-Type', 'application/json');
-      proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-      proxyReq.write(bodyData);
-    }
-    
-    console.log('📤 PROXYING LiveKit TO:', proxyReq.path);
-    logger.info({ userId: req.userId, path: proxyReq.path }, 'Proxying to livekit-service');
-  },
-  onProxyRes: (proxyRes, req, res) => {
-    console.log('📥 LiveKit proxy response:', proxyRes.statusCode);
-  },
-  onError: (err, req, res) => {
-    console.error('❌ LiveKit PROXY ERROR:', err.message);
-    logger.error({ error: err.message }, 'LiveKit service proxy error');
-    res.status(503).json({ error: 'LiveKit service unavailable' });
-  },
-};
-
-app.use('/api/livekit', authMiddleware, createProxyMiddleware(livekitProxyConfig));
-console.log('✅ /api/livekit/* → LiveKit Service (port 3005)');
-
-// ✅ JSON parsing ПОСЛЕ всех proxy (чтобы не конфликтовать)
-app.use(express.json({ limit: '10mb' }));
-
 const routes = require('./routes');
-
 app.use('/', routes);
 
 // 404 handler
@@ -234,9 +185,6 @@ const server = app.listen(PORT, () => {
   console.log('  POST /auth/upload-avatar → Auth Service');
   console.log('  POST /api/chat/files/upload → Chat Service');
   console.log('  POST /chat/files/upload → Chat Service');
-  console.log('Media service routes:');
-  console.log('  OPTIONS /api/media/* → CORS preflight');
-  console.log('  * /api/media/* → Media Service (port 3004)');
   console.log('=================================');
   logger.info(`Gateway running on port ${PORT}`);
 });

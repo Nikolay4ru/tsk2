@@ -1,454 +1,284 @@
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
-const redis = require('../shared/database/redis');
-const eventEmitter = require('../shared/events/event-emitter');
 const logger = require('../shared/utils/logger');
 const userModel = require('../services/auth-service/models/user.model');
+const eventEmitter = require('../shared/events/event-emitter');
+const { v4: uuidv4 } = require('uuid');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
 
 class WebSocketHandler {
   constructor(server) {
     this.wss = new WebSocket.Server({ 
-      server,
+      server, 
       path: '/ws',
-      clientTracking: true,
+      perMessageDeflate: false,
     });
-    
+
     this.clients = new Map();
-    this.subscriptions = new Map();
-    
-    this.init();
-  }
 
-  init() {
-    this.wss.on('connection', (ws, req) => this.handleConnection(ws, req));
-    
-    this.heartbeatInterval = setInterval(() => {
-      this.wss.clients.forEach((ws) => {
-        if (ws.isAlive === false) {
-          logger.debug({ userId: ws.userId }, 'Terminating dead connection');
-          this.handleDisconnect(ws);
-          return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping();
-      });
-    }, 30000);
-
-    this.setupEventBroadcasting();
+    this.setupWebSocketServer();
+    this.subscribeToRedis();
 
     logger.info('WebSocket server initialized');
   }
 
-  async handleConnection(ws, req) {
-    const url = new URL(req.url, 'http://localhost');
-    const token = url.searchParams.get('token');
+  setupWebSocketServer() {
+    this.wss.on('connection', async (ws, req) => {
+      console.log('New WebSocket connection attempt');
 
-    logger.info('New WebSocket connection attempt');
+      const url = new URL(req.url, 'http://localhost');
+      const token = url.searchParams.get('token');
 
-    if (!token) {
-      logger.warn('WebSocket connection rejected: no token');
-      ws.close(1008, 'Authentication required');
-      return;
-    }
-
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      
-      ws.userId = decoded.userId;
-      ws.userEmail = decoded.email;
-      ws.connectionId = uuidv4();
-      ws.isAlive = true;
-      ws.subscriptions = new Set();
-
-      if (!this.clients.has(ws.userId)) {
-        this.clients.set(ws.userId, new Set());
+      if (!token) {
+        ws.close(1008, 'No token provided');
+        return;
       }
-      this.clients.get(ws.userId).add(ws);
-      this.subscriptions.set(ws.connectionId, new Set());
 
-      const postgres = require('../shared/database/postgres');
       try {
-        const { rows } = await postgres.query(
-          'SELECT username FROM users WHERE id = $1',
-          [ws.userId]
-        );
-        ws.username = rows[0]?.username || ws.userEmail.split('@')[0];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const userId = decoded.userId;
+        const username = decoded.username || decoded.email;
+
+        const connectionId = uuidv4();
+
+        const client = {
+          ws,
+          userId,
+          username,
+          connectionId,
+          subscriptions: new Set(),
+        };
+
+        this.clients.set(connectionId, client);
+
+        await userModel.setOnline(userId);
+
+        await eventEmitter.publish('user:status', {
+          userId,
+          isOnline: true,
+        });
+
+        logger.info({ userId, username, connectionId }, 'WebSocket connected');
+
+        ws.on('message', (data) => this.handleMessage(client, data));
+        ws.on('close', () => this.handleDisconnect(client));
+        ws.on('error', (error) => logger.error({ error: error.message }, 'WebSocket error'));
+
+        ws.send(JSON.stringify({ 
+          type: 'connected', 
+          data: { connectionId, userId, username } 
+        }));
+
       } catch (error) {
-        ws.username = ws.userEmail.split('@')[0];
-        logger.error({ error: error.message }, 'Failed to fetch username');
+        logger.error({ error: error.message }, 'WebSocket authentication failed');
+        ws.close(1008, 'Invalid token');
       }
-
-      await redis.sadd('online_users', ws.userId);
-      await this.publishUserStatus(ws.userId, 'online');
-      await userModel.setOnline(ws.userId);
-      this.broadcastUserStatus(ws.userId, true);
-
-      ws.on('pong', () => {
-        ws.isAlive = true;
-      });
-
-      ws.on('message', (data) => this.handleMessage(ws, data));
-      ws.on('close', () => this.handleDisconnect(ws));
-      ws.on('error', (error) => {
-        logger.error({ userId: ws.userId, error: error.message }, 'WebSocket error');
-      });
-
-      this.send(ws, {
-        type: 'connected',
-        data: {
-          connectionId: ws.connectionId,
-          userId: ws.userId,
-          username: ws.username,
-        },
-      });
-
-      logger.info({ userId: ws.userId, username: ws.username, connectionId: ws.connectionId }, 'WebSocket connected');
-
-    } catch (error) {
-      logger.error({ error: error.message }, 'WebSocket authentication failed');
-      ws.close(1008, 'Authentication failed');
-    }
+    });
   }
 
-  async handleMessage(ws, data) {
+  handleMessage(client, data) {
     try {
       const message = JSON.parse(data);
-      const { type, payload } = message;
 
-      console.log('📨 WS Message:', { type, from: ws.userId });
+      console.log('📨 WS Message:', {
+        type: message.type,
+        from: client.userId,
+      });
 
-      switch (type) {
+      if (!message.type) {
+        console.error('❌ No message type');
+        return;
+      }
+
+      switch (message.type) {
         case 'subscribe':
-          await this.handleSubscribe(ws, payload);
+          if (message.payload?.channel) {
+            this.handleSubscribe(client, message.payload.channel);
+          }
           break;
 
         case 'unsubscribe':
-          await this.handleUnsubscribe(ws, payload);
-          break;
-
-        case 'typing':
-          await this.handleTyping(ws, payload);
-          break;
-
-        case 'webrtc-signal':
-          this.handleWebRTCSignal(ws, message); // ✅ ИСПРАВЛЕНО: ws вместо client
+          if (message.payload?.channel) {
+            this.handleUnsubscribe(client, message.payload.channel);
+          }
           break;
 
         case 'ping':
-          this.send(ws, { type: 'pong', data: { timestamp: Date.now() } });
+          client.ws.send(JSON.stringify({ type: 'pong' }));
+          break;
+
+        case 'typing':
+          this.handleTyping(client, message.payload);
+          break;
+
+        case 'webrtc-signal':
+          this.handleWebRTCSignal(client, message);
           break;
 
         default:
-          this.send(ws, { type: 'error', data: { message: 'Unknown message type' } });
+          logger.warn({ type: message.type }, 'Unknown message type');
       }
-
     } catch (error) {
-      logger.error({ userId: ws.userId, error: error.message }, 'Failed to handle message');
-      this.send(ws, { type: 'error', data: { message: 'Invalid message format' } });
+      logger.error({ error: error.message }, 'Handle message error');
     }
   }
 
-  handleWebRTCSignal(ws, message) {
+  handleSubscribe(client, channel) {
+    client.subscriptions.add(channel);
+    console.log(`✅ ${client.userId} subscribed to ${channel}`);
+    client.ws.send(JSON.stringify({
+      type: 'subscribed',
+      data: { channel }
+    }));
+  }
+
+  handleUnsubscribe(client, channel) {
+    client.subscriptions.delete(channel);
+    console.log(`✅ ${client.userId} unsubscribed from ${channel}`);
+    client.ws.send(JSON.stringify({
+      type: 'unsubscribed',
+      data: { channel }
+    }));
+  }
+
+  async handleTyping(client, payload) {
+    const { roomId, isTyping } = payload;
+
+    if (!roomId) return;
+
+    await eventEmitter.publish(`room:${roomId}`, {
+      type: 'typing',
+      data: {
+        userId: client.userId,
+        username: client.username,
+        isTyping,
+      },
+    });
+  }
+
+  handleWebRTCSignal(client, message) {
     const { callId, roomId, signal, targetUserId, signalType } = message;
 
     console.log('📞 WebRTC Signal:', { 
       signalType, 
       callId, 
-      from: ws.userId,  // ✅ ИСПРАВЛЕНО
+      from: client.userId, 
       to: targetUserId,
       roomId,
     });
 
-    if (!signal) {
-      console.error('❌ No signal data');
-      this.send(ws, {
-        type: 'error',
-        data: { message: 'Invalid WebRTC signal: missing signal data' },
-      });
+    if (!signal || !callId) {
+      console.error('❌ Invalid WebRTC signal');
       return;
     }
 
-    if (!callId) {
-      console.error('❌ No callId');
-      this.send(ws, {
-        type: 'error',
-        data: { message: 'Invalid WebRTC signal: missing callId' },
-      });
-      return;
-    }
-
-    // Для 1-1 звонков - отправить конкретному пользователю
+    // 1-1 call
     if (targetUserId) {
       console.log('🔍 Looking for target user:', targetUserId);
-      console.log('🔍 Online users:', Array.from(this.clients.keys()));
-      
-      // ✅ ИСПРАВЛЕНО: правильный поиск в Map<userId, Set<ws>>
-      const targetWsSet = this.clients.get(targetUserId);
-      
-      if (targetWsSet && targetWsSet.size > 0) {
-        // Отправить первому доступному WebSocket этого пользователя
-        const targetWs = Array.from(targetWsSet)[0];
-        
-        if (targetWs.readyState === WebSocket.OPEN) {
-          this.send(targetWs, {
-            type: 'webrtc-signal',
-            callId,
-            fromUserId: ws.userId,
-            signalType,
-            signal,
-          });
-          console.log('✅ Signal sent to target user:', targetUserId);
-        } else {
-          console.warn('⚠️ Target WebSocket not ready');
-        }
+      const onlineUsers = Array.from(this.clients.values()).map(c => c.userId);
+      console.log('🔍 Online users:', onlineUsers);
+
+      const targetClient = Array.from(this.clients.values())
+        .find(c => c.userId === targetUserId);
+
+      if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+        targetClient.ws.send(JSON.stringify({
+          type: 'webrtc-signal',
+          callId,
+          fromUserId: client.userId,
+          signalType,
+          signal,
+        }));
+        console.log('✅ Signal sent to target user:', targetUserId);
       } else {
         console.warn('⚠️ Target user not connected:', targetUserId);
       }
     } 
-    // Для конференций - broadcast в комнату
+    // Conference call
     else if (roomId) {
       let sent = 0;
-      const channel = `room:${roomId}`;
-      
-      for (const [connectionId, channels] of this.subscriptions.entries()) {
-        if (channels.has(channel)) {
-          for (const userWsSet of this.clients.values()) {
-            for (const userWs of userWsSet) {
-              if (userWs.connectionId === connectionId && 
-                  userWs.userId !== ws.userId &&
-                  userWs.readyState === WebSocket.OPEN) {
-                this.send(userWs, {
-                  type: 'webrtc-signal',
-                  callId,
-                  fromUserId: ws.userId,
-                  signalType,
-                  signal,
-                });
-                sent++;
-              }
-            }
-          }
+      this.clients.forEach(c => {
+        if (c.userId !== client.userId && 
+            c.subscriptions.has(`room:${roomId}`) &&
+            c.ws.readyState === WebSocket.OPEN) {
+          c.ws.send(JSON.stringify({
+            type: 'webrtc-signal',
+            callId,
+            fromUserId: client.userId,
+            signalType,
+            signal,
+          }));
+          sent++;
         }
-      }
-      console.log(`✅ Signal broadcast to ${sent} users in room:${roomId}`);
-    } else {
-      console.error('❌ No targetUserId or roomId');
-      this.send(ws, {
-        type: 'error',
-        data: { message: 'Invalid WebRTC signal: missing targetUserId or roomId' },
       });
+      console.log(`✅ Signal broadcast to ${sent} users in room:${roomId}`);
     }
   }
 
-  async handleSubscribe(ws, payload) {
-    const { channel } = payload;
+  async handleDisconnect(client) {
+    console.log('WebSocket disconnected:', client.userId);
 
-    if (!channel) {
-      this.send(ws, { type: 'error', data: { message: 'Channel is required' } });
-      return;
-    }
-
-    const hasAccess = await this.verifyChannelAccess(ws.userId, channel);
-    if (!hasAccess) {
-      logger.warn({ userId: ws.userId, channel }, 'Access denied to channel');
-      this.send(ws, { type: 'error', data: { message: 'Access denied' } });
-      return;
-    }
-
-    ws.subscriptions.add(channel);
-    this.subscriptions.get(ws.connectionId).add(channel);
-
-    await redis.sadd(`subscription:${ws.userId}`, channel);
-
-    this.send(ws, { 
-      type: 'subscribed', 
-      data: { channel } 
-    });
-
-    logger.info({ userId: ws.userId, channel }, 'Subscribed to channel');
-  }
-
-  async handleUnsubscribe(ws, payload) {
-    const { channel } = payload;
-
-    if (!channel) {
-      this.send(ws, { type: 'error', data: { message: 'Channel is required' } });
-      return;
-    }
-
-    ws.subscriptions.delete(channel);
-    this.subscriptions.get(ws.connectionId).delete(channel);
-
-    await redis.srem(`subscription:${ws.userId}`, channel);
-
-    this.send(ws, { 
-      type: 'unsubscribed', 
-      data: { channel } 
-    });
-
-    logger.info({ userId: ws.userId, channel }, 'Unsubscribed from channel');
-  }
-
-  async handleTyping(ws, payload) {
-    const { roomId, isTyping } = payload;
-
-    if (!roomId) return;
-
-    const channel = `room:${roomId}`;
-    
-    this.broadcastToChannel(
-      channel,
-      {
-        type: 'typing',
-        data: {
-          userId: ws.userId,
-          username: ws.username,
-          isTyping,
-          timestamp: Date.now(),
-        },
-      },
-      ws.userId
-    );
-  }
-
-  async handleDisconnect(ws) {
-    if (!ws.userId) return;
-
-    if (this.clients.has(ws.userId)) {
-      this.clients.get(ws.userId).delete(ws);
-      if (this.clients.get(ws.userId).size === 0) {
-        this.clients.delete(ws.userId);
-        
-        await redis.srem('online_users', ws.userId);
-        await this.publishUserStatus(ws.userId, 'offline');
-        await userModel.setOffline(ws.userId);
-        this.broadcastUserStatus(ws.userId, false);
-      }
-    }
-
-    if (this.subscriptions.has(ws.connectionId)) {
-      this.subscriptions.delete(ws.connectionId);
-    }
-
-    logger.info({ userId: ws.userId, connectionId: ws.connectionId }, 'WebSocket disconnected');
-  }
-
-  async verifyChannelAccess(userId, channel) {
-    const [type, id] = channel.split(':');
+    this.clients.delete(client.connectionId);
 
     try {
-      const postgres = require('../shared/database/postgres');
-      
-      switch (type) {
-        case 'room':
-          const { rows } = await postgres.query(
-            'SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2',
-            [id, userId]
-          );
-          return rows.length > 0;
+      await userModel.setOffline(client.userId);
 
-        case 'user':
-          return id === userId;
-
-        default:
-          return false;
-      }
-    } catch (error) {
-      logger.error({ userId, channel, error: error.message }, 'Failed to verify channel access');
-      return false;
-    }
-  }
-
-  setupEventBroadcasting() {
-    eventEmitter.on('room:*', (data) => {
-      const channel = data._channel || 'room:unknown';
-      const excludeUserId = data._excludeUserId || null;
-      
-      this.broadcastToChannel(channel, data, excludeUserId);
-    });
-
-    logger.info('Event broadcasting setup complete');
-  }
-
-  broadcastToChannel(channel, data, excludeUserId = null) {
-    let sentCount = 0;
-    
-    for (const [connectionId, channels] of this.subscriptions.entries()) {
-      if (channels.has(channel)) {
-        for (const userWsSet of this.clients.values()) {
-          for (const ws of userWsSet) {
-            if (ws.connectionId === connectionId && ws.readyState === WebSocket.OPEN) {
-              if (excludeUserId && ws.userId === excludeUserId) {
-                continue;
-              }
-              
-              this.send(ws, {
-                type: 'event',
-                channel,
-                data,
-              });
-              sentCount++;
-            }
-          }
-        }
-      }
-    }
-
-    logger.debug({ channel, sentCount, excludeUserId }, 'Event broadcasted');
-  }
-
-  broadcastUserStatus(userId, isOnline) {
-    const statusEvent = {
-      type: 'user_status',
-      data: {
-        userId,
-        isOnline,
-        timestamp: Date.now(),
-      },
-    };
-
-    for (const userWsSet of this.clients.values()) {
-      for (const ws of userWsSet) {
-        if (ws.readyState === WebSocket.OPEN) {
-          this.send(ws, { type: 'event', channel: 'global', data: statusEvent });
-        }
-      }
-    }
-  }
-
-  async publishUserStatus(userId, status) {
-    await eventEmitter.publish('user:status', {
-      userId,
-      status,
-      timestamp: Date.now(),
-    });
-  }
-
-  send(ws, message) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message));
-    }
-  }
-
-  broadcastToUser(userId, message) {
-    if (this.clients.has(userId)) {
-      this.clients.get(userId).forEach(ws => {
-        this.send(ws, message);
+      await eventEmitter.publish('user:status', {
+        userId: client.userId,
+        isOnline: false,
       });
+    } catch (error) {
+      logger.error({ error: error.message }, 'Handle disconnect error');
     }
   }
 
-  getOnlineUsers() {
-    return Array.from(this.clients.keys());
+  subscribeToRedis() {
+    // ✅ СЛУШАЕМ room:* события
+    eventEmitter.on('room:*', (channel, event) => {
+      console.log('📢 Room event:', { channel, type: event.type });
+      this.broadcastToChannel(channel, event);
+    });
+
+    // ✅ СЛУШАЕМ user:* события
+    eventEmitter.on('user:*', (channel, event) => {
+      console.log('📢 User event:', { channel, userId: event.userId });
+      this.broadcastUserEvent(event);
+    });
+
+    logger.info('Subscribed to Redis events');
   }
 
-  close() {
-    clearInterval(this.heartbeatInterval);
-    this.wss.close();
-    logger.info('WebSocket server closed');
+  broadcastToChannel(channel, event) {
+    const { type, data } = event;
+    
+    let sent = 0;
+    this.clients.forEach(client => {
+      if (client.subscriptions.has(channel) && 
+          client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify({
+          type: 'event',
+          channel,
+          data: { type, data }
+        }));
+        sent++;
+      }
+    });
+    
+    console.log(`✅ Broadcast to ${sent} clients on ${channel}`);
+  }
+
+  broadcastUserEvent(event) {
+    // Broadcast user status to all connected clients
+    this.clients.forEach(client => {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify({
+          type: 'event',
+          channel: 'global',
+          data: { type: 'user_status', data: event }
+        }));
+      }
+    });
   }
 }
 

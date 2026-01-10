@@ -1,0 +1,563 @@
+// active-call-window.js - Enhanced with indicators, avatars, names
+import API from '../../api.js';
+import PeerCallClient from './peer-call-client.js';
+import ConferenceCallClient from './conference-call-client.js';
+
+let currentCall = null;
+let isAudioMuted = false;
+let isVideoOff = false;
+let callTimer = null;
+let callStartTime = Date.now();
+let callClient = null;
+let remoteStreams = new Map(); // userId -> { video, stream, container }
+let userProducerStates = new Map(); // userId -> { audioEnabled, videoEnabled }
+
+async function show(call, isInitiator) {
+  currentCall = call;
+
+  console.log('🎥 Active call window:', { 
+    callId: call.callId, 
+    targetUserId: call.targetUserId,
+    roomId: call.roomId,
+    isConference: call.isConference,
+    isInitiator 
+  });
+
+  const window = document.createElement('div');
+  window.className = 'call-window';
+  window.id = 'active-call-window';
+
+  // Different layouts for 1-1 vs conference
+  if (call.isConference || !call.targetUserId) {
+    // Conference layout with grid
+    window.innerHTML = `
+      <div class="call-window-header">
+        <h3>${call.roomName || 'Conference Call'}</h3>
+        <span class="call-duration" id="call-duration">00:00</span>
+      </div>
+      
+      <div class="call-video-container conference">
+        <div id="remote-videos-grid" class="remote-videos-grid"></div>
+        <video id="local-video" class="local-video-pip" autoplay playsinline muted></video>
+        <div class="local-video-overlay">
+          <span class="participant-name">You</span>
+          <div class="participant-indicators">
+            <span class="indicator-mic" id="local-mic-indicator">🎤</span>
+            <span class="indicator-video" id="local-video-indicator">📹</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="call-controls">
+        <button class="btn-call-control" id="toggle-audio-btn" title="Mute">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
+          </svg>
+        </button>
+        
+        <button class="btn-call-control" id="toggle-video-btn" title="Stop video">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+        </button>
+        
+        <button class="btn-call-control btn-end-call" id="end-call-btn" title="End call">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 1L1 23M1 1l22 22"/>
+          </svg>
+        </button>
+      </div>
+    `;
+  } else {
+    // 1-1 call layout
+    window.innerHTML = `
+      <div class="call-window-header">
+        <h3>${call.roomName || 'Call'}</h3>
+        <span class="call-duration" id="call-duration">00:00</span>
+      </div>
+      
+      <div class="call-video-container">
+        <video id="remote-video" autoplay playsinline></video>
+        <video id="local-video" autoplay playsinline muted></video>
+      </div>
+      
+      <div class="call-controls">
+        <button class="btn-call-control" id="toggle-audio-btn" title="Mute">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
+          </svg>
+        </button>
+        
+        <button class="btn-call-control" id="toggle-video-btn" title="Stop video">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+        </button>
+        
+        <button class="btn-call-control btn-end-call" id="end-call-btn" title="End call">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 1L1 23M1 1l22 22"/>
+          </svg>
+        </button>
+      </div>
+    `;
+  }
+
+  document.body.appendChild(window);
+
+  await startCall(isInitiator);
+  setupEventListeners(window);
+  startCallTimer();
+}
+
+async function startCall(isInitiator) {
+  try {
+    const isVideo = currentCall.callType === 'video';
+    
+    // Choose client: MediaSoup for conferences, SimplePeer for 1-1
+    if (currentCall.isConference || !currentCall.targetUserId) {
+      console.log('🎥 Using MediaSoup for conference call');
+      callClient = ConferenceCallClient;
+      
+      // Setup callbacks for conference (dynamic video grid)
+      callClient.onRemoteStream = (stream, userId) => {
+        console.log('📥 New remote stream from user:', userId);
+        addRemoteStream(stream, userId);
+      };
+
+      callClient.onRemoteStreamRemoved = (userId) => {
+        console.log('📤 Remote stream removed:', userId);
+        removeRemoteStream(userId);
+      };
+
+      callClient.onProducerStateChange = (userId, kind, enabled) => {
+        console.log('🔄 Producer state changed:', { userId, kind, enabled });
+        updateProducerState(userId, kind, enabled);
+      };
+      
+    } else {
+      console.log('🎥 Using SimplePeer for 1-1 call');
+      callClient = PeerCallClient;
+      
+      // Setup callback for 1-1 call (single remote video)
+      callClient.onRemoteStream = (stream) => {
+        console.log('📥 Setting remote stream to video element');
+        const remoteVideo = document.getElementById('remote-video');
+        if (remoteVideo) {
+          remoteVideo.srcObject = stream;
+          remoteVideo.style.display = 'block';
+          console.log('✅ Remote video srcObject set');
+        }
+      };
+    }
+
+    callClient.onCallEnded = () => {
+      console.log('📞 Call ended by peer, cleaning up');
+      cleanup();
+    };
+    
+    // Create connection
+    let localStream;
+    if (currentCall.isConference || !currentCall.targetUserId) {
+      // MediaSoup conference
+      localStream = await callClient.startCall(
+        currentCall.callId,
+        currentCall.roomId,
+        isVideo
+      );
+    } else {
+      // SimplePeer 1-1
+      localStream = await callClient.startCall(
+        currentCall.callId,
+        currentCall.targetUserId,
+        isInitiator,
+        isVideo,
+        currentCall.roomId
+      );
+    }
+
+    // Set local video
+    const localVideo = document.getElementById('local-video');
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+      localVideo.style.display = 'block';
+      console.log('✅ Local video srcObject set');
+      
+      // Monitor local tracks
+      localStream.getTracks().forEach(track => {
+        track.addEventListener('ended', () => {
+          console.log('🛑 Local track ended:', track.kind);
+        });
+      });
+    }
+
+    console.log('✅ Call started successfully');
+  } catch (error) {
+    console.error('❌ Failed to start call:', error);
+    alert('Failed to start call: ' + error.message);
+    cleanup();
+  }
+}
+
+// Add remote stream to grid (for conference calls)
+async function addRemoteStream(stream, userId) {
+  // Если поток уже есть — добавляем новые треки
+  if (remoteStreams.has(userId)) {
+    console.log('⚠️ Stream for user', userId, 'already exists, adding new tracks');
+    const existing = remoteStreams.get(userId);
+    const existingStream = existing.video.srcObject;
+
+    stream.getTracks().forEach(newTrack => {
+      // Удаляем старый track того же типа
+      const oldTrack = existingStream.getTracks().find(t => t.kind === newTrack.kind);
+      if (oldTrack) {
+        existingStream.removeTrack(oldTrack);
+        console.log(`♻️ Removed old ${newTrack.kind} track for ${userId}`);
+      }
+
+      existingStream.addTrack(newTrack);
+      console.log(`✅ Added new ${newTrack.kind} track for ${userId}`);
+
+      updateTrackState(userId, newTrack.kind, newTrack.enabled);
+
+      newTrack.addEventListener('ended', () => {
+        console.log(`🛑 Track ended: ${newTrack.kind} from ${userId}`);
+      });
+
+      newTrack.addEventListener('mute', () => {
+        console.log(`🔇 Track muted: ${newTrack.kind} from ${userId}`);
+        updateTrackState(userId, newTrack.kind, false);
+      });
+
+      newTrack.addEventListener('unmute', () => {
+        console.log(`🔊 Track unmuted: ${newTrack.kind} from ${userId}`);
+        updateTrackState(userId, newTrack.kind, true);
+      });
+    });
+
+    return;
+  }
+
+  console.log('➕ Adding remote stream for user:', userId);
+
+  const grid = document.getElementById('remote-videos-grid');
+  if (!grid) {
+    console.error('❌ Remote videos grid not found!');
+    return;
+  }
+
+  const userName = await getUserName(userId);
+  const userAvatar = await getUserAvatar(userId);
+
+  // Создаем контейнер
+  const container = document.createElement('div');
+  container.className = 'remote-video-container';
+  container.id = `remote-video-${userId}`;
+
+  // Аватар
+  const avatar = document.createElement('div');
+  avatar.className = 'participant-avatar';
+  avatar.style.backgroundImage = `url(${userAvatar})`;
+  avatar.textContent = userName.charAt(0).toUpperCase();
+
+  // Видео
+  const video = document.createElement('video');
+  video.autoplay = true;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  video.srcObject = stream;
+
+  // Обязательный вызов play для старых браузеров
+  video.onloadedmetadata = () => {
+    video.play().catch(err => {
+      if (err.name !== 'AbortError') {
+        console.error('❌ Video play failed:', err);
+      }
+    });
+  };
+
+  // Наложение имени и индикаторов
+  const overlay = document.createElement('div');
+  overlay.className = 'remote-video-overlay';
+  
+  const nameLabel = document.createElement('span');
+  nameLabel.className = 'participant-name';
+  nameLabel.textContent = userName;
+  
+  const indicators = document.createElement('div');
+  indicators.className = 'participant-indicators';
+  indicators.innerHTML = `
+    <span class="indicator-mic" data-user="${userId}">🎤</span>
+    <span class="indicator-video" data-user="${userId}">📹</span>
+  `;
+
+  overlay.appendChild(nameLabel);
+  overlay.appendChild(indicators);
+
+  // Вставляем элементы в контейнер
+  container.appendChild(avatar);
+  container.appendChild(video);
+  container.appendChild(overlay);
+  grid.appendChild(container);
+
+  remoteStreams.set(userId, { video, stream, container, avatar });
+  userProducerStates.set(userId, { audioEnabled: true, videoEnabled: true });
+
+  // Мониторинг треков
+  stream.getTracks().forEach(track => {
+    updateTrackState(userId, track.kind, track.enabled);
+
+    track.addEventListener('ended', () => {
+      console.log(`🛑 Track ended: ${track.kind} from ${userId}`);
+    });
+    track.addEventListener('mute', () => {
+      console.log(`🔇 Track muted: ${track.kind} from ${userId}`);
+      updateTrackState(userId, track.kind, false);
+    });
+    track.addEventListener('unmute', () => {
+      console.log(`🔊 Track unmuted: ${track.kind} from ${userId}`);
+      updateTrackState(userId, track.kind, true);
+    });
+  });
+
+  // Обновляем сетку
+  updateGridLayout();
+
+  console.log('✅ Remote video added for user:', userId);
+  console.log('📊 Total remote streams:', remoteStreams.size);
+}
+
+
+// Update track state (mic/video indicators and avatar)
+function updateTrackState(userId, kind, enabled) {
+  // Получаем текущее состояние или создаем
+  const state = userProducerStates.get(userId) || { audioEnabled: true, videoEnabled: true };
+
+  if (kind === 'audio') {
+    state.audioEnabled = enabled;
+  } else if (kind === 'video') {
+    state.videoEnabled = enabled;
+  }
+
+  userProducerStates.set(userId, state);
+
+  // Обновляем индикаторы
+  const micIndicator = document.querySelector(`.indicator-mic[data-user="${userId}"]`);
+  const videoIndicator = document.querySelector(`.indicator-video[data-user="${userId}"]`);
+
+  if (micIndicator) {
+    micIndicator.classList.toggle('muted', !state.audioEnabled);
+    micIndicator.textContent = state.audioEnabled ? '🎤' : '🔇';
+  }
+
+  if (videoIndicator) {
+    videoIndicator.classList.toggle('off', !state.videoEnabled);
+    videoIndicator.textContent = state.videoEnabled ? '📹' : '📵';
+  }
+
+  // Показать/скрыть видео или аватар без остановки потока
+  const streamData = remoteStreams.get(userId);
+  if (streamData) {
+    const { video, avatar } = streamData;
+
+    if (state.videoEnabled) {
+      video.style.opacity = '1';
+      video.style.pointerEvents = 'auto';
+      avatar.style.display = 'none';
+    } else {
+      video.style.opacity = '0'; // вместо display:none
+      video.style.pointerEvents = 'none';
+      avatar.style.display = 'flex';
+    }
+  }
+
+  console.log(`✅ Updated state for ${userId}:`, state);
+}
+
+
+// Update producer state (callback from client)
+function updateProducerState(userId, kind, enabled) {
+  updateTrackState(userId, kind, enabled);
+}
+
+// Get user name (fetch from API or use cached)
+async function getUserName(userId) {
+  try {
+    // Try to get from API
+    const response = await API.getUserInfo(userId);
+    return response.username || response.name || response.email || `User ${userId.substring(0, 8)}`;
+  } catch (error) {
+    console.warn('Failed to fetch user info:', error);
+    return `User ${userId.substring(0, 8)}`;
+  }
+}
+
+// Get user avatar (fetch from API or use default)
+async function getUserAvatar(userId) {
+  try {
+    const response = await API.getUserInfo(userId);
+    return response.avatar || response.profilePicture || generateDefaultAvatar(userId);
+  } catch (error) {
+    return generateDefaultAvatar(userId);
+  }
+}
+
+// Generate default avatar (colored circle with initial)
+function generateDefaultAvatar(userId) {
+  const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
+  const colorIndex = userId.charCodeAt(0) % colors.length;
+  const color = colors[colorIndex];
+  
+  // Return data URL with colored circle
+  return `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'><circle cx='50' cy='50' r='50' fill='${encodeURIComponent(color)}'/></svg>`;
+}
+
+// Remove remote stream from grid
+function removeRemoteStream(userId) {
+  const streamData = remoteStreams.get(userId);
+  if (!streamData) {
+    console.warn('⚠️ No video found for user:', userId);
+    return;
+  }
+
+  streamData.container.remove();
+  remoteStreams.delete(userId);
+  userProducerStates.delete(userId);
+  updateGridLayout();
+
+  console.log('✅ Remote video removed for user:', userId);
+  console.log('📊 Total remote streams:', remoteStreams.size);
+}
+
+// Update grid layout based on number of participants
+function updateGridLayout() {
+  const grid = document.getElementById('remote-videos-grid');
+  if (!grid) return;
+
+  const count = remoteStreams.size;
+
+  // Remove existing grid class
+  grid.className = 'remote-videos-grid';
+
+  // Add appropriate grid class based on count
+  if (count === 0) {
+    grid.classList.add('grid-empty');
+  } else if (count === 1) {
+    grid.classList.add('grid-1');
+  } else if (count === 2) {
+    grid.classList.add('grid-2');
+  } else if (count <= 4) {
+    grid.classList.add('grid-4');
+  } else if (count <= 9) {
+    grid.classList.add('grid-9');
+  } else {
+    grid.classList.add('grid-16');
+  }
+
+  console.log('📐 Grid layout updated for', count, 'participants');
+}
+
+function setupEventListeners(window) {
+  const toggleAudioBtn = window.querySelector('#toggle-audio-btn');
+  const toggleVideoBtn = window.querySelector('#toggle-video-btn');
+  const endCallBtn = window.querySelector('#end-call-btn');
+
+  toggleAudioBtn.addEventListener('click', () => {
+    isAudioMuted = !isAudioMuted;
+    if (callClient) {
+      callClient.toggleAudio(!isAudioMuted);
+    }
+    toggleAudioBtn.classList.toggle('muted', isAudioMuted);
+    
+    // Update local indicator
+    const localMicIndicator = document.getElementById('local-mic-indicator');
+    if (localMicIndicator) {
+      localMicIndicator.textContent = isAudioMuted ? '🔇' : '🎤';
+      localMicIndicator.classList.toggle('muted', isAudioMuted);
+    }
+  });
+
+  toggleVideoBtn.addEventListener('click', () => {
+    isVideoOff = !isVideoOff;
+    if (callClient) {
+      callClient.toggleVideo(!isVideoOff);
+    }
+    toggleVideoBtn.classList.toggle('off', isVideoOff);
+
+    const localVideo = document.getElementById('local-video');
+    if (localVideo) {
+      localVideo.style.display = isVideoOff ? 'none' : 'block';
+    }
+    
+    // Update local indicator
+    const localVideoIndicator = document.getElementById('local-video-indicator');
+    if (localVideoIndicator) {
+      localVideoIndicator.textContent = isVideoOff ? '📵' : '📹';
+      localVideoIndicator.classList.toggle('off', isVideoOff);
+    }
+  });
+
+  endCallBtn.addEventListener('click', async () => {
+    try {
+      await API.endCall(currentCall.callId);
+      cleanup();
+    } catch (error) {
+      console.error('Failed to end call:', error);
+      cleanup();
+    }
+  });
+}
+
+function startCallTimer() {
+  callStartTime = Date.now();
+  callTimer = setInterval(() => {
+    const duration = Math.floor((Date.now() - callStartTime) / 1000);
+    const minutes = Math.floor(duration / 60);
+    const seconds = duration % 60;
+    
+    const durationEl = document.getElementById('call-duration');
+    if (durationEl) {
+      durationEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+  }, 1000);
+}
+
+function cleanup() {
+  console.log('📞 Ending call');
+  
+  if (callTimer) {
+    clearInterval(callTimer);
+    callTimer = null;
+  }
+
+  if (callClient) {
+    callClient.endCall();
+    callClient = null;
+  }
+
+  // Clear remote streams
+  remoteStreams.clear();
+  userProducerStates.clear();
+
+  const window = document.getElementById('active-call-window');
+  if (window) {
+    window.remove();
+  }
+
+  currentCall = null;
+  isAudioMuted = false;
+  isVideoOff = false;
+}
+
+function hide() {
+  cleanup();
+}
+
+export default {
+  show,
+  hide,
+};

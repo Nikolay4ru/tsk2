@@ -1830,3 +1830,1520 @@ img {
   background: rgba(var(--color-primary-rgb), 0.1);
 }
 
+
+
+
+
+
+
+
+
+
+
+/* Conference Call Video Grid Styles */
+
+/* Conference container */
+.call-video-container.conference {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 120px);
+  background: #1a1a1a;
+  overflow: hidden;
+}
+
+/* Remote videos grid container */
+.remote-videos-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+/* Empty state */
+.remote-videos-grid.grid-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remote-videos-grid.grid-empty::before {
+  content: 'Waiting for other participants...';
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 18px;
+}
+
+/* Single participant - full screen */
+.remote-videos-grid.grid-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+/* 2 participants - side by side */
+.remote-videos-grid.grid-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+/* 3-4 participants - 2x2 grid */
+.remote-videos-grid.grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* 5-9 participants - 3x3 grid */
+.remote-videos-grid.grid-9 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+/* 10+ participants - 4x4 grid */
+.remote-videos-grid.grid-16 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+}
+
+/* Remote video container */
+.remote-video-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Remote video element */
+.remote-video-grid-item {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* User label overlay */
+.remote-video-label {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1;
+}
+
+/* Local video PIP (Picture-in-Picture) */
+.local-video-pip {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  width: 200px;
+  height: 150px;
+  object-fit: cover;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  z-index: 10;
+  background: #000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .local-video-pip {
+    width: 120px;
+    height: 90px;
+    bottom: 70px;
+    right: 10px;
+  }
+
+  .remote-videos-grid {
+    padding: 8px;
+    gap: 4px;
+  }
+
+  .remote-video-label {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  /* Adjust grid for mobile */
+  .remote-videos-grid.grid-9 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+  }
+
+  .remote-videos-grid.grid-16 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+  }
+}
+
+
+
+.remote-video-container video {
+  z-index: 1;
+}
+
+@keyframes spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+/* Hide loading spinner when video is playing */
+.remote-video-container video[srcObject] ~ ::before {
+  display: none;
+}
+
+/* Ensure existing 1-1 call styles still work */
+.call-video-container:not(.conference) #remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #1a1a1a;
+}
+
+.call-video-container:not(.conference) #local-video {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 240px;
+  height: 180px;
+  object-fit: cover;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  z-index: 10;
+  background: #000;
+}
+
+
+
+/* Enhanced Conference Call Styles - Indicators, Avatars, Names */
+
+/* Conference container */
+.call-video-container.conference {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 120px);
+  background: #1a1a1a;
+  overflow: hidden;
+}
+
+/* Remote videos grid container */
+.remote-videos-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+/* Empty state */
+.remote-videos-grid.grid-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remote-videos-grid.grid-empty::before {
+  content: 'Waiting for other participants...';
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 18px;
+}
+
+/* Grid layouts */
+.remote-videos-grid.grid-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.remote-videos-grid.grid-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+.remote-videos-grid.grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.remote-videos-grid.grid-9 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.remote-videos-grid.grid-16 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+}
+
+/* Remote video container */
+.remote-video-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Remote video element */
+.remote-video-grid-item {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #000;
+}
+
+/* Participant avatar (shown when video is off) */
+.participant-avatar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: none; /* Hidden by default, shown when video off */
+  align-items: center;
+  justify-content: center;
+  background: #2c3e50;
+  background-size: cover;
+  background-position: center;
+  color: white;
+  font-size: 64px;
+  font-weight: bold;
+  z-index: 1;
+}
+
+/* Video overlay (name + indicators) */
+.remote-video-overlay {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+  border-radius: 8px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Participant name label */
+.participant-name {
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Indicators container */
+.participant-indicators {
+  display: flex;
+  gap: 8px;
+}
+
+/* Indicator icons */
+.indicator-mic,
+.indicator-video {
+  font-size: 16px;
+  opacity: 0.9;
+  transition: all 0.3s ease;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+
+/* Muted/Off states */
+.indicator-mic.muted {
+  opacity: 0.4;
+  filter: grayscale(100%) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+
+.indicator-video.off {
+  opacity: 0.4;
+  filter: grayscale(100%) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+
+/* Local video PIP (Picture-in-Picture) */
+.local-video-pip {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  width: 200px;
+  height: 150px;
+  object-fit: cover;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  z-index: 10;
+  background: #000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Local video overlay */
+.local-video-overlay {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  width: 200px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 8px;
+  z-index: 11;
+  pointer-events: none;
+}
+
+.local-video-overlay .participant-name {
+  font-size: 12px;
+}
+
+.local-video-overlay .participant-indicators {
+  gap: 4px;
+}
+
+.local-video-overlay .indicator-mic,
+.local-video-overlay .indicator-video {
+  font-size: 14px;
+}
+
+/* Call controls */
+.call-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  z-index: 100;
+}
+
+.btn-call-control {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-call-control:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.1);
+}
+
+.btn-call-control.muted,
+.btn-call-control.off {
+  background: rgba(255, 59, 48, 0.2);
+  border-color: rgba(255, 59, 48, 0.5);
+}
+
+.btn-end-call {
+  background: rgba(255, 59, 48, 0.9);
+  border-color: rgba(255, 59, 48, 1);
+}
+
+.btn-end-call:hover {
+  background: rgba(255, 59, 48, 1);
+  transform: scale(1.1);
+}
+
+/* Video loading state */
+.remote-video-container::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.remote-video-container.loading::after {
+  opacity: 1;
+}
+
+@keyframes spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .local-video-pip {
+    width: 120px;
+    height: 90px;
+    bottom: 70px;
+    right: 10px;
+    border-width: 2px;
+  }
+
+  .local-video-overlay {
+    width: 120px;
+    bottom: 70px;
+    right: 10px;
+    padding: 4px;
+  }
+
+  .local-video-overlay .participant-name {
+    font-size: 10px;
+  }
+
+  .local-video-overlay .indicator-mic,
+  .local-video-overlay .indicator-video {
+    font-size: 12px;
+  }
+
+  .remote-videos-grid {
+    padding: 8px;
+    gap: 4px;
+  }
+
+  .participant-name {
+    font-size: 12px;
+  }
+
+  .indicator-mic,
+  .indicator-video {
+    font-size: 14px;
+  }
+
+  .remote-video-overlay {
+    padding: 6px 8px;
+  }
+
+  .participant-avatar {
+    font-size: 48px;
+  }
+
+  /* Adjust grid for mobile */
+  .remote-videos-grid.grid-9 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+  }
+
+  .remote-videos-grid.grid-16 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+  }
+
+  .call-controls {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .btn-call-control {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+/* Connection quality indicator */
+.connection-quality {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  font-size: 12px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  color: white;
+  display: none; /* Show when needed */
+}
+
+.connection-quality.poor {
+  display: block;
+  color: #ff9800;
+}
+
+.connection-quality.bad {
+  display: block;
+  color: #f44336;
+}
+
+/* Speaking indicator (audio activity) */
+.remote-video-container.speaking {
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.6);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(76, 175, 80, 0.3);
+  }
+}
+
+/* Ensure existing 1-1 call styles still work */
+.call-video-container:not(.conference) #remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #1a1a1a;
+}
+
+.call-video-container:not(.conference) #local-video {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 240px;
+  height: 180px;
+  object-fit: cover;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  z-index: 10;
+  background: #000;
+}
+
+/* Call window header */
+.call-window-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: rgba(0, 0, 0, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.call-window-header h3 {
+  color: white;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.call-duration {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+
+
+/* LiveKit Call Styles */
+.call-window {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #1a1a1a;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+}
+
+.call-window-header {
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: white;
+}
+
+.call-duration {
+  font-family: monospace;
+  font-size: 1.2rem;
+}
+
+.call-video-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.remote-videos-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 4px;
+  padding: 4px;
+}
+
+.remote-videos-grid.grid-1 {
+  grid-template-columns: 1fr;
+}
+
+.remote-videos-grid.grid-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.remote-videos-grid.grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.remote-videos-grid.grid-9 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.remote-video-container {
+  position: relative;
+  background: #2a2a2a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.remote-video-grid-item,
+.participant-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.participant-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 4rem;
+  color: white;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.remote-video-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.5rem;
+  background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: white;
+}
+
+.participant-name {
+  font-weight: 500;
+}
+
+.participant-indicators {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.indicator-mic,
+.indicator-video {
+  font-size: 1.2rem;
+}
+
+.indicator-mic.muted,
+.indicator-video.off {
+  opacity: 0.3;
+}
+
+.local-video-pip {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 200px;
+  height: 150px;
+  border-radius: 8px;
+  border: 2px solid white;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  object-fit: cover;
+}
+
+.local-video-overlay {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 200px;
+  padding: 0.5rem;
+  background: rgba(0,0,0,0.6);
+  border-radius: 0 0 8px 8px;
+  display: flex;
+  justify-content: space-between;
+  color: white;
+  font-size: 0.9rem;
+}
+
+.call-controls {
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.btn-call-control {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: none;
+  background: #4a5568;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-call-control:hover {
+  background: #2d3748;
+  transform: scale(1.1);
+}
+
+.btn-call-control.muted,
+.btn-call-control.off {
+  background: #e53e3e;
+}
+
+.btn-end-call {
+  background: #e53e3e;
+}
+
+.btn-end-call:hover {
+  background: #c53030;
+}
+
+
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIDEO LOADER - Add to your call-window.css or main.css
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Video loader overlay */
+.video-loader {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Loader spinner animation */
+.loader-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   IONICONS STYLING - Replace emoji styles
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Participant indicators with ionicons */
+.participant-indicators {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.participant-indicators ion-icon {
+  font-size: 16px;
+  color: #fff;
+  opacity: 0.9;
+  transition: all 0.2s ease;
+}
+
+/* Active state (enabled) */
+.participant-indicators ion-icon.indicator-mic {
+  color: #4caf50; /* Green for active mic */
+}
+
+.participant-indicators ion-icon.indicator-video {
+  color: #2196f3; /* Blue for active video */
+}
+
+/* Muted/Off state */
+.participant-indicators ion-icon.off {
+  color: #f44336; /* Red for muted/off */
+  opacity: 0.8;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOCAL VIDEO INDICATORS (Your video)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.local-video-overlay .participant-indicators ion-icon {
+  font-size: 14px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+#local-mic-indicator {
+  color: #4caf50;
+}
+
+#local-mic-indicator.off {
+  color: #f44336;
+}
+
+#local-video-indicator {
+  color: #2196f3;
+}
+
+#local-video-indicator.off {
+  color: #f44336;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONTROL BUTTONS WITH IONICONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.call-controls {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.btn-call-control {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-call-control ion-icon {
+  font-size: 24px;
+  color: #fff;
+}
+
+.btn-call-control:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+.btn-call-control:active {
+  transform: scale(0.95);
+}
+
+/* Muted state */
+.btn-call-control.muted {
+  background: rgba(244, 67, 54, 0.3);
+}
+
+.btn-call-control.muted ion-icon {
+  color: #f44336;
+}
+
+/* Video off state */
+.btn-call-control.off {
+  background: rgba(244, 67, 54, 0.3);
+}
+
+.btn-call-control.off ion-icon {
+  color: #f44336;
+}
+
+/* End call button */
+.btn-end-call {
+  background: rgba(244, 67, 54, 0.9);
+}
+
+.btn-end-call:hover {
+  background: rgba(244, 67, 54, 1);
+}
+
+.btn-end-call ion-icon {
+  color: #fff;
+  transform: rotate(135deg);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REMOTE VIDEO CONTAINER IMPROVEMENTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.remote-video-container {
+  position: relative;
+  background: #1a1a1a;
+  border-radius: 8px;
+  overflow: hidden;
+  aspect-ratio: 16/9;
+}
+
+.remote-video-grid-item {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Avatar (shown when video is off) */
+.participant-avatar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  z-index: 1;
+}
+
+/* Overlay with name and indicators */
+.remote-video-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px 12px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+}
+
+.participant-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GRID LAYOUTS (as before, but ensure they work with loader)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.remote-videos-grid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.remote-videos-grid.grid-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remote-videos-grid.grid-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.remote-videos-grid.grid-2 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: 1fr;
+}
+
+.remote-videos-grid.grid-4 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.remote-videos-grid.grid-9 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.remote-videos-grid.grid-16 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+}
+
+.empty-grid-message {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 18px;
+  text-align: center;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE IMPROVEMENTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .btn-call-control {
+    width: 44px;
+    height: 44px;
+  }
+
+  .btn-call-control ion-icon {
+    font-size: 22px;
+  }
+
+  .participant-indicators ion-icon {
+    font-size: 14px;
+  }
+
+  .participant-name {
+    font-size: 12px;
+  }
+
+  .loader-spinner {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ACCESSIBILITY
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.btn-call-control:focus {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+/* Screen reader only text */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FIX: Remove ::before loader when video is playing
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+
+
+/* ✅ CRITICAL: Hide ::before when video is playing */
+.remote-video-container.video-playing::before {
+  display: none !important;
+}
+
+/* Hide ::before when video is off (showing avatar) */
+.remote-video-container.video-off::before {
+  display: none !important;
+}
+
+/* Spin animation */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Alternative: Completely remove ::before and use only .video-loader
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* If you want to remove ::before completely, use this instead: */
+/*
+.remote-video-container::before {
+  display: none !important;
+}
+*/
+
+/* Then rely only on .video-loader div (which we already manage in JS) */
+.video-loader {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 5;
+  pointer-events: none;
+}
+
+.loader-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIRTUAL BACKGROUND UI STYLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Modal overlay */
+.virtual-bg-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: none; /* Hidden by default */
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.virtual-bg-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+/* Modal content */
+.virtual-bg-content {
+  position: relative;
+  background: #1a1a1a;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 1;
+}
+
+/* Header */
+.virtual-bg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.virtual-bg-header h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.btn-close-modal {
+  background: transparent;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.2s;
+}
+
+.btn-close-modal:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-close-modal ion-icon {
+  font-size: 24px;
+}
+
+/* Background grid */
+.virtual-bg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+/* Background option */
+.bg-option {
+  cursor: pointer;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.2s;
+  background: #2a2a2a;
+  border: 2px solid transparent;
+}
+
+.bg-option:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.bg-option.active {
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.3);
+}
+
+/* Preview container */
+.bg-preview {
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  position: relative;
+}
+
+.bg-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bg-preview ion-icon {
+  font-size: 48px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Background name */
+.bg-name {
+  display: block;
+  padding: 8px 12px;
+  text-align: center;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Upload option */
+.bg-option-upload .bg-preview {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+/* Blur settings */
+.blur-settings {
+  background: #2a2a2a;
+  padding: 16px;
+  border-radius: 12px;
+  margin-top: 16px;
+}
+
+.blur-settings label {
+  display: block;
+  color: #fff;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.blur-settings input[type="range"] {
+  width: 100%;
+  height: 4px;
+  background: #444;
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.blur-settings input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #2196f3;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.blur-settings input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #2196f3;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+#blur-value {
+  display: inline-block;
+  margin-left: 8px;
+  color: #2196f3;
+  font-weight: 600;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIRTUAL BACKGROUND BUTTON IN CALL CONTROLS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.btn-virtual-bg {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.btn-virtual-bg ion-icon {
+  font-size: 24px;
+  color: #fff;
+}
+
+.btn-virtual-bg:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+.btn-virtual-bg:active {
+  transform: scale(0.95);
+}
+
+/* Active state (when background is applied) */
+.btn-virtual-bg.active {
+  background: rgba(33, 150, 243, 0.3);
+  border: 2px solid #2196f3;
+}
+
+.btn-virtual-bg.active ion-icon {
+  color: #2196f3;
+}
+
+/* Badge indicator */
+.btn-virtual-bg.active::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  background: #4caf50;
+  border-radius: 50%;
+  border: 2px solid #1a1a1a;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .virtual-bg-content {
+    width: 95%;
+    padding: 16px;
+    max-height: 85vh;
+  }
+
+  .virtual-bg-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 8px;
+  }
+
+  .bg-name {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+
+  .bg-preview ion-icon {
+    font-size: 36px;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOADING STATE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bg-option.loading {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.bg-option.loading .bg-preview::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SCROLLBAR
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.virtual-bg-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.virtual-bg-content::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+.virtual-bg-content::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
+}
+
+.virtual-bg-content::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}

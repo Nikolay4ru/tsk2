@@ -50,12 +50,12 @@ exports.addParticipant = async (callId, userId) => {
 };
 
 exports.updateParticipantStatus = async (callId, userId, status) => {
-  // ✅ ИСПРАВЛЕНО: правильный порядок параметров
+  // ✅ ИСПРАВЛЕНО: явное приведение типа VARCHAR
   const { rows } = await postgres.query(
     `UPDATE call_participants 
-     SET status = $3, 
-         joined_at = CASE WHEN $3 = 'joined' THEN NOW() ELSE joined_at END,
-         left_at = CASE WHEN $3 = 'left' THEN NOW() ELSE left_at END
+     SET status = $3::VARCHAR, 
+         joined_at = CASE WHEN $3::VARCHAR = 'joined' THEN NOW() ELSE joined_at END,
+         left_at = CASE WHEN $3::VARCHAR = 'left' THEN NOW() ELSE left_at END
      WHERE call_id = $1 AND user_id = $2 
      RETURNING *`,
     [callId, userId, status]

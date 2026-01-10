@@ -1,3 +1,4 @@
+// frontend/src/api.js
 const API_BASE = '/api';
 
 class API {
@@ -64,8 +65,7 @@ class API {
     }
   }
 
-
-async uploadFile(endpoint, formData) {
+  async uploadFile(endpoint, formData) {
     const url = `${this.baseURL}${endpoint}`;
     
     console.log('📤 Upload Request:', { url });
@@ -102,7 +102,6 @@ async uploadFile(endpoint, formData) {
     }
   }
 
-
   // Auth
   async login(email, password) {
     const data = await this.request('/auth/login', {
@@ -113,7 +112,6 @@ async uploadFile(endpoint, formData) {
     this.setToken(data.accessToken);
     return data;
   }
-
 
   async register(email, password, username) {
     const data = await this.request('/auth/register', {
@@ -134,12 +132,11 @@ async uploadFile(endpoint, formData) {
     return this.request('/auth/me');
   }
 
-async uploadAvatar(file) {
+  async uploadAvatar(file) {
     const formData = new FormData();
     formData.append('avatar', file);
     return this.uploadFile('/auth/upload-avatar', formData);
   }
-
 
   // Rooms
   async getRooms() {
@@ -156,7 +153,6 @@ async uploadAvatar(file) {
       body: JSON.stringify(data),
     });
   }
-
 
   async createPrivateRoom(recipientId) {
     return this.request('/chat/rooms/private', {
@@ -202,6 +198,22 @@ async uploadAvatar(file) {
     return this.request(`/auth/users/search?q=${encodeURIComponent(query)}`);
   }
 
+  async getUserInfo(userId) {
+    try {
+      return await this.request(`/auth/users/${userId}`);
+    } catch (error) {
+      console.error('Failed to fetch user info:', error);
+      return {
+        userId,
+        username: `User ${userId.substring(0, 8)}`,
+        name: null,
+        email: null,
+        avatar: null,
+        profilePicture: null
+      };
+    }
+  }
+
   // Tasks
   async getTasks(filters = {}) {
     const params = new URLSearchParams(filters);
@@ -220,8 +232,6 @@ async uploadAvatar(file) {
     });
   }
 
-  
-
   async updateTask(taskId, data) {
     return this.request(`/task/tasks/${taskId}`, {
       method: 'PUT',
@@ -234,6 +244,7 @@ async uploadAvatar(file) {
       method: 'DELETE',
     });
   }
+
   // Files
   async uploadChatFile(roomId, file) {
     const formData = new FormData();
@@ -246,81 +257,122 @@ async uploadAvatar(file) {
     return this.request(`/chat/rooms/${roomId}/files`);
   }
 
+  // ========================================================================
+  // LIVEKIT API - Primary call management
+  // ========================================================================
 
-  // Calls
-  async startCall(roomId, type = 'video') {
-    return this.request('/chat/calls/start', {
+  /**
+   * Get LiveKit access token
+   * @param {string} roomName - LiveKit room name
+   * @param {string} participantName - Participant display name
+   * @param {string} participantId - Participant ID
+   * @returns {Promise<Object>} Token, URL, room info
+   */
+  async getLiveKitToken(roomName, participantName, participantId) {
+    return this.request('/livekit/token', {
       method: 'POST',
-      body: JSON.stringify({ roomId, type }),
+      body: JSON.stringify({
+        roomName,
+        participantName,
+        participantId: participantId || this.getCurrentUserId(),
+      }),
     });
   }
 
+  /**
+   * List active LiveKit rooms
+   * @returns {Promise<Object>}
+   */
+  async listLiveKitRooms() {
+    return this.request('/livekit/rooms');
+  }
+
+  /**
+   * Get LiveKit room details
+   * @param {string} roomName - Room name
+   * @returns {Promise<Object>}
+   */
+  async getLiveKitRoom(roomName) {
+    return this.request(`/livekit/room/${roomName}`);
+  }
+
+  /**
+   * End LiveKit room (disconnect all participants)
+   * @param {string} roomName - Room name
+   * @returns {Promise<Object>}
+   */
+  async endLiveKitRoom(roomName) {
+    return this.request(`/livekit/room/${roomName}/end`, {
+      method: 'POST',
+    });
+  }
+
+  // ========================================================================
+  // CALL MANAGEMENT - Stub methods for IncomingCallModal
+  // ========================================================================
+  // These are client-side only for LiveKit
+  // Call state is managed via WebSocket notifications
+
+  /**
+   * Answer an incoming call (client-side only for LiveKit)
+   * @param {string} callId - Call ID
+   * @returns {Promise<Object>}
+   */
   async answerCall(callId) {
-    return this.request(`/chat/calls/${callId}/answer`, {
-      method: 'POST',
-    });
+    console.log('📞 Answer call (client-side):', callId);
+    // For LiveKit, we just return success
+    // Actual connection happens via getLiveKitToken()
+    return { success: true, callId };
   }
 
+  /**
+   * Reject an incoming call (client-side only for LiveKit)
+   * @param {string} callId - Call ID
+   * @returns {Promise<Object>}
+   */
   async rejectCall(callId) {
-    return this.request(`/chat/calls/${callId}/reject`, {
-      method: 'POST',
-    });
+    console.log('📞 Reject call (client-side):', callId);
+    // For LiveKit, we just return success
+    // Notification sent via WebSocket
+    return { success: true, callId };
   }
 
+  /**
+   * End an active call (client-side only for LiveKit)
+   * @param {string} callId - Call ID
+   * @returns {Promise<Object>}
+   */
   async endCall(callId) {
-    return this.request(`/chat/calls/${callId}/end`, {
-      method: 'POST',
-    });
+    console.log('📞 End call (client-side):', callId);
+    // For LiveKit, we just return success
+    // Disconnect happens via LiveKitCallClient.endCall()
+    return { success: true, callId };
   }
 
-  async getActiveCall(roomId) {
-    return this.request(`/chat/rooms/${roomId}/call`);
-  }
+  // ========================================================================
+  // UTILITY METHODS
+  // ========================================================================
 
-  // MediaSoup (Media Service)
-  async getRouterCapabilities(callId) {
-    return this.request(`/media/router-capabilities/${callId}`);
-  }
+  /**
+   * Get current user ID from localStorage or JWT
+   * @returns {string} User ID or 'anonymous'
+   */
+  getCurrentUserId() {
+    try {
+      const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      if (user.id || user.userId) {
+        return user.id || user.userId;
+      }
 
-  async createTransport(callId, options) {
-    return this.request(`/media/create-transport/${callId}`, {
-      method: 'POST',
-      body: JSON.stringify(options),
-    });
-  }
+      const token = localStorage.getItem('accessToken');
+      if (!token) return 'anonymous';
 
-  async connectTransport(transportId, dtlsParameters) {
-    return this.request('/media/connect-transport', {
-      method: 'POST',
-      body: JSON.stringify({ transportId, dtlsParameters }),
-    });
-  }
-
-  async produce(transportId, kind, rtpParameters) {
-    return this.request('/media/produce', {
-      method: 'POST',
-      body: JSON.stringify({ transportId, kind, rtpParameters }),
-    });
-  }
-
-  async consume(transportId, producerId, rtpCapabilities) {
-    return this.request('/media/consume', {
-      method: 'POST',
-      body: JSON.stringify({ transportId, producerId, rtpCapabilities }),
-    });
-  }
-
-  async resumeConsumer(consumerId) {
-    return this.request('/media/resume-consumer', {
-      method: 'POST',
-      body: JSON.stringify({ consumerId }),
-    });
-  }
-
-  async cleanupCall(callId) {
-    return this.request(`/media/call/${callId}`, {
-      method: 'DELETE',
-    });
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.userId || payload.user_id || payload.sub || payload.id || 'anonymous';
+    } catch (error) {
+      console.warn('Failed to get userId:', error);
+      return 'anonymous';
+    }
   }
 }
 

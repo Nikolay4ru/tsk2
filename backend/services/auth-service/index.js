@@ -1,3 +1,4 @@
+// backend/services/auth-service/index.js
 require('dotenv').config({ path: '/var/www/chatapp/backend/.env' });
 const express = require('express');
 const jwt = require('jsonwebtoken');
@@ -334,6 +335,8 @@ app.post('/upload-avatar', authMiddleware, uploadAvatar, async (req, res) => {
   }
 });
 
+
+
 // Search users (protected)
 app.get('/users/search', authMiddleware, async (req, res) => {
   try {
@@ -370,6 +373,55 @@ app.get('/users/search', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
+
+// Get user by ID (protected) - Add this BEFORE the logout endpoint
+app.get('/users/:userId', authMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    logger.info({ requestedUserId: userId, requesterId: req.userId }, 'Fetching user info');
+    
+    const { rows } = await postgres.query(
+      `SELECT 
+         id, 
+         username, 
+         email, 
+         avatar_url,
+         COALESCE(is_online, false) as is_online,
+         status,
+         last_seen,
+         created_at
+       FROM users 
+       WHERE id = $1`,
+      [userId]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const user = rows[0];
+    
+    res.json({
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+      avatar: user.avatar_url,
+      profilePicture: user.avatar_url, // Для обратной совместимости
+      isOnline: user.is_online,
+      status: user.status,
+      lastSeen: user.last_seen
+    });
+    
+  } catch (error) {
+    logger.error({ error: error.message, userId: req.params.userId }, 'Get user info error');
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 
 
 

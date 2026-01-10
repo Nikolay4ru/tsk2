@@ -1,5 +1,6 @@
 import Router from './router.js';
-import WebSocketManager from './websocket.js';
+//import WebSocketManager from './websocket.js';
+import wsManager from './websocket.js';
 import API from './api.js';
 import * as LoginModule from './modules/auth/login.js';
 import * as RegisterModule from './modules/auth/register.js';
@@ -12,7 +13,7 @@ class App {
   constructor() {
     this.user = null;
     this.router = null;
-    this.ws = null;
+    this.ws = wsManager;
   }
 
   async init() {
@@ -31,8 +32,12 @@ class App {
         console.log('✅ User authenticated:', this.user.username);
         
         // Initialize WebSocket
-        this.ws = new WebSocketManager();
-        await this.ws.connect();
+       // this.ws = new WebSocketManager();
+        this.ws = wsManager;
+
+if (!this.ws.ws || this.ws.ws.readyState !== WebSocket.OPEN) {
+  await this.ws.connect();
+}
       } catch (error) {
         console.error('❌ Auth check failed:', error);
         localStorage.removeItem('accessToken');
@@ -152,8 +157,12 @@ class App {
       // Токен уже установлен в API.login()
 
       // Initialize WebSocket
-      this.ws = new WebSocketManager();
-      await this.ws.connect();
+      //this.ws = new WebSocketManager();
+      this.ws = wsManager;
+
+if (!this.ws.ws || this.ws.ws.readyState !== WebSocket.OPEN) {
+  await this.ws.connect();
+}
 
       // Navigate to chat
       this.router.navigate('/chat');
@@ -173,8 +182,12 @@ class App {
       // Токен уже установлен в API.register()
 
       // Initialize WebSocket
-      this.ws = new WebSocketManager();
-      await this.ws.connect();
+      //this.ws = new WebSocketManager();
+      this.ws = wsManager;
+
+if (!this.ws.ws || this.ws.ws.readyState !== WebSocket.OPEN) {
+  await this.ws.connect();
+}
 
       // Navigate to chat
       this.router.navigate('/chat');
